@@ -1,0 +1,327 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Outfit:wght@500;600;700;800;900&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=Space+Mono:wght@700&display=swap');
+@import "tailwindcss";
+
+:root {
+  /* Paleta Anime High Fantasy & JRPG Tático Vibrante */
+  --astral-dark: #16132b;
+  --astral-mid: #1e1b3a;
+  --celestial-blue: #13182e;
+  --glass-panel: rgba(37, 33, 71, 0.85);
+  
+  --gold-solar: #f59e0b;
+  --gold-bright: #fbbf24;
+  --orange-vibrant: #ff7a00;
+  --cyan-mana: #38bdf8;
+  --purple-astral: #a855f7;
+  --emerald-sacred: #10b981;
+  --crimson-fury: #f43f5e;
+
+  --foreground: #f8fafc;
+  --background: var(--astral-dark);
+}
+
+body {
+  background: linear-gradient(135deg, #16132b 0%, #1e1b3a 50%, #13182e 100%);
+  background-attachment: fixed;
+  color: #f8fafc;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* ======================================================== */
+/* FONTES HEROICAS & JRPG */
+/* ======================================================== */
+.font-gothic {
+  font-family: 'Outfit', 'Cinzel', sans-serif;
+  letter-spacing: 0.03em;
+}
+
+.font-parchment {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+.font-numbers {
+  font-family: 'Outfit', 'Space Mono', sans-serif;
+  letter-spacing: 0.04em;
+}
+
+/* ======================================================== */
+/* VIDRO ARCANO TRANSLÚCIDO & BORDAS LUMINOSAS */
+/* ======================================================== */
+.glass-arcane {
+  background: rgba(37, 33, 71, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1.5px solid rgba(245, 158, 11, 0.35);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.45);
+}
+
+.glass-arcane-cyan {
+  background: rgba(22, 28, 58, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1.5px solid rgba(56, 189, 248, 0.45);
+  box-shadow: 0 8px 32px 0 rgba(19, 24, 46, 0.55);
+}
+
+/* ======================================================== */
+/* BORDAS LUMINOSAS */
+/* ======================================================== */
+.border-solar {
+  border-color: #f59e0b;
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.3);
+}
+
+.border-mana {
+  border-color: #38bdf8;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.3);
+}
+
+/* ======================================================== */
+/* BOTÕES: FANTASIA HEROICA / JRPG VIBRANTE */
+/* ======================================================== */
+.btn-iron {
+  background: linear-gradient(135deg, #2b2554 0%, #1f1b3e 100%);
+  color: #f8fafc;
+  border: 1.5px solid rgba(245, 158, 11, 0.45);
+  box-shadow: 
+    0 4px 14px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  font-family: 'Outfit', sans-serif;
+  text-transform: uppercase;
+  font-weight: 700;
+  border-radius: 0.5rem;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-iron:hover {
+  background: linear-gradient(135deg, #3d3475 0%, #292452 100%);
+  border-color: #f59e0b;
+  color: #fbbf24;
+  box-shadow: 
+    0 0 20px rgba(245, 158, 11, 0.4),
+    0 4px 16px rgba(0, 0, 0, 0.4);
+  transform: translateY(-1.5px);
+}
+
+.btn-iron-torch {
+  background: linear-gradient(135deg, #ff7a00 0%, #f59e0b 50%, #d97706 100%);
+  color: #0f0d1e;
+  border: 1.5px solid #fef08a;
+  box-shadow: 
+    0 0 24px rgba(245, 158, 11, 0.6),
+    0 4px 12px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  font-family: 'Outfit', sans-serif;
+  text-transform: uppercase;
+  font-weight: 800;
+  border-radius: 0.5rem;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-iron-torch:hover {
+  background: linear-gradient(135deg, #fbbf24 0%, #ff7a00 100%);
+  box-shadow: 
+    0 0 32px rgba(255, 122, 0, 0.8),
+    0 4px 16px rgba(0, 0, 0, 0.4);
+  transform: translateY(-2px) scale(1.02);
+}
+
+/* ======================================================== */
+/* ANIMAÇÃO DE CHAMA / BRILHO SOLAR */
+/* ======================================================== */
+@keyframes solarGlow {
+  0% {
+    filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.5));
+    transform: scale(1);
+  }
+  50% {
+    filter: drop-shadow(0 0 18px rgba(255, 122, 0, 0.85));
+    transform: scale(1.03);
+  }
+  100% {
+    filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.5));
+    transform: scale(1);
+  }
+}
+
+.animate-torch {
+  animation: solarGlow 2.5s infinite ease-in-out;
+}
+
+/* ======================================================== */
+/* CÍRCULO MÁGICO GIRATÓRIO */
+/* ======================================================== */
+@keyframes magicCircleRotate {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-magic-circle {
+  animation: magicCircleRotate 20s linear infinite;
+}
+
+@keyframes magicCircleReverse {
+  0% {
+    transform: rotate(360deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+.animate-magic-circle-rev {
+  animation: magicCircleReverse 14s linear infinite;
+}
+
+/* ======================================================== */
+/* FLUTUAÇÃO DE CRISTAL NEXUS */
+/* ======================================================== */
+@keyframes crystalFloat {
+  0% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-8px) rotate(2deg);
+  }
+  100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+}
+
+.animate-crystal-float {
+  animation: crystalFloat 4s ease-in-out infinite;
+}
+
+/* ======================================================== */
+/* FLOATING DAMAGE HEROICO */
+/* ======================================================== */
+@keyframes floatingDamage {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.6);
+  }
+  20% {
+    opacity: 1;
+    transform: translate(-50%, -15px) scale(1.25);
+  }
+  70% {
+    opacity: 1;
+    transform: translate(-50%, -35px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -55px) scale(0.7);
+  }
+}
+
+.animate-floating-damage {
+  animation: floatingDamage 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* ======================================================== */
+/* COMBAT & PUPPET BREATHING ANIMATIONS */
+/* ======================================================== */
+@keyframes puppetBreathing {
+  0% {
+    transform: scaleY(1) scaleX(1);
+    transform-origin: bottom center;
+  }
+  50% {
+    transform: scaleY(1.03) scaleX(0.985);
+    transform-origin: bottom center;
+  }
+  100% {
+    transform: scaleY(1) scaleX(1);
+    transform-origin: bottom center;
+  }
+}
+
+.animate-puppet-breathing {
+  animation: puppetBreathing 3s ease-in-out infinite;
+}
+
+@keyframes hitShake {
+  0% {
+    transform: translate(0, 0) scale(1);
+    filter: brightness(2) drop-shadow(0 0 10px #f43f5e);
+  }
+  20% {
+    transform: translate(-4px, 2px) scale(0.96);
+    filter: brightness(1.8) drop-shadow(0 0 12px #e11d48);
+  }
+  40% {
+    transform: translate(4px, -2px) scale(1.03);
+    filter: brightness(1.5);
+  }
+  60% {
+    transform: translate(-2px, -1px) scale(0.98);
+    filter: brightness(1.2);
+  }
+  100% {
+    transform: translate(0, 0) scale(1);
+    filter: brightness(1);
+  }
+}
+
+.animate-hit-shake {
+  animation: hitShake 0.4s ease-out;
+}
+
+@keyframes screenShake {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-4px, 3px); }
+  40% { transform: translate(4px, -3px); }
+  60% { transform: translate(-3px, -2px); }
+  80% { transform: translate(3px, 1px); }
+  100% { transform: translate(0, 0); }
+}
+
+.animate-screen-shake {
+  animation: screenShake 0.4s ease-out;
+}
+
+@keyframes tombstoneDissolve {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(0.95);
+    filter: drop-shadow(0 0 10px #f43f5e) brightness(1.6);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.85);
+    filter: blur(4px) brightness(2);
+  }
+}
+
+.animate-tombstone-dissolve {
+  animation: tombstoneDissolve 0.65s ease-out forwards;
+}
+
+@keyframes slashLines {
+  0% {
+    opacity: 0;
+    transform: scale(0.9) skewX(-15deg);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1.05) skewX(-10deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.15) skewX(-5deg);
+  }
+}
+
+.animate-slash-lines {
+  animation: slashLines 0.48s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
