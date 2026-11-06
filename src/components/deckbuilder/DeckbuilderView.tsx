@@ -2,7 +2,13 @@
 
 import { useState, useTransition, useMemo } from "react";
 import { Card } from "@/db/schema";
-import { DeckbuilderData, saveDeckAction } from "@/actions/deck";
+import {
+  DeckbuilderData,
+  saveDeckAction,
+  upgradeCardLevelAction,
+  UserCollectionItem,
+} from "@/actions/deck";
+import { ScaledCard } from "@/lib/cardProgression";
 import { CardItem } from "./CardItem";
 import { DeckSidebar } from "./DeckSidebar";
 import {
@@ -14,6 +20,8 @@ import {
   SlidersHorizontal,
   RotateCcw,
   Check,
+  Coins,
+  ArrowUpCircle,
 } from "lucide-react";
 
 interface DeckbuilderViewProps {
@@ -42,6 +50,19 @@ const RARITIES = [
 ];
 
 export function DeckbuilderView({ initialData }: DeckbuilderViewProps) {
+  // Estado da Coleção e Ouro do Jogador (para evolução de nível em tempo real)
+  const [collectionState, setCollectionState] = useState<UserCollectionItem[]>(
+    () => initialData.collection
+  );
+  const [playerGold, setPlayerGold] = useState<number>(
+    initialData.user.gold ?? 500
+  );
+  const [upgradingCardId, setUpgradingCardId] = useState<string | null>(null);
+  const [upgradeBanner, setUpgradeBanner] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+
   // Estado do Baralho
   const [deckName, setDeckName] = useState(
     initialData.activeDeck?.name || "Meu Baralho Tático"
@@ -52,9 +73,9 @@ export function DeckbuilderView({ initialData }: DeckbuilderViewProps) {
 
   // Mapeamento { [cardId]: { card, quantity } }
   const [deckCardsMap, setDeckCardsMap] = useState<
-    Map<string, { card: Card; quantity: number }>
+    Map<string, { card: ScaledCard; quantity: number }>
   >(() => {
-    const map = new Map<string, { card: Card; quantity: number }>();
+    const map = new Map<string, { card: ScaledCard; quantity: number }>();
     if (initialData.activeDeck) {
       for (const item of initialData.activeDeck.cards) {
         map.set(item.card.id, { card: item.card, quantity: item.quantity });
@@ -89,7 +110,7 @@ export function DeckbuilderView({ initialData }: DeckbuilderViewProps) {
   }, [deckCardsArray]);
 
   // Manipulação do Baralho
-  const handleAddCard = (card: Card) => {
+  const handleAddCard = (card: ScaledCard) => {
     if (totalCardsInDeck >= 30) return;
 
     setSaveMessage(null);
@@ -103,6 +124,49 @@ export function DeckbuilderView({ initialData }: DeckbuilderViewProps) {
       }
       return next;
     });
+  };
+
+  // Evoluir nível de uma carta (Nível 1 até 10, +10% status por nível)
+  const handleUpgradeCard = async (cardId: string) => {
+    setUpgradeBanner(null);
+    setUpgradingCardId(cardId);
+    try {
+      const res = await upgradeCardLevelAction(cardId);
+      if (res.success && res.updatedCard) {
+        setPlayerGold(res.remainingGold ?? playerGold);
+        setCollectionState((prev) =>
+          prev.map((item) =>
+            item.card.id === cardId
+              ? {
+                  ...item,
+                  card: res.updatedCard!,
+                  ownedQuantity: res.newQuantity ?? item.ownedQuantity,
+                  level: res.newLevel ?? item.level,
+                }
+              : item
+          )
+        );
+        setDeckCardsMap((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(cardId);
+          if (existing) {
+            next.set(cardId, { ...existing, card: res.updatedCard! });
+          }
+          return next;
+        });
+        setUpgradeBanner({
+          type: "success",
+          text: res.message || "Carta evoluída com sucesso!",
+        });
+      } else {
+        setUpgradeBanner({
+          type: "error",
+          text: res.error || "Não foi possível evoluir esta carta.",
+        });
+      }
+    } finally {
+      setUpgradingCardId(null);
+    }
   };
 
   const handleRemoveCard = (cardId: string) => {
@@ -167,7 +231,7 @@ export function DeckbuilderView({ initialData }: DeckbuilderViewProps) {
 
   // Filtragem da Coleção
   const filteredCollection = useMemo(() => {
-    return initialData.collection.filter(({ card }) => {
+    return collectionState.filter(({ card }) => {
       // Busca por nome
       if (
         searchQuery &&
@@ -200,7 +264,7 @@ export function DeckbuilderView({ initialData }: DeckbuilderViewProps) {
       return true;
     });
   }, [
-    initialData.collection,
+    collectionState,
     searchQuery,
     selectedCategory,
     selectedType,
@@ -225,13 +289,46 @@ export function DeckbuilderView({ initialData }: DeckbuilderViewProps) {
           </p>
         </div>
 
-        <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 px-4 py-2 rounded-2xl text-xs">
-          <span className="text-slate-400">Coleção Total:</span>
-          <strong className="text-amber-300 font-black">
-            {initialData.collection.length} tipos de cartas
-          </strong>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 bg-slate-900 border border-amber-500/40 px-4 py-2 rounded-2xl text-xs">
+            <Coins className="w-4 h-4 text-amber-400" />
+            <span className="text-slate-400">Ouro p/ Evolução:</span>
+            <strong className="text-amber-300 font-black text-sm">
+              {playerGold.toLocaleString("pt-BR")}
+            </strong>
+          </div>
+
+          <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 px-4 py-2 rounded-2xl text-xs">
+            <span className="text-slate-400">Coleção Total:</span>
+            <strong className="text-amber-300 font-black">
+              {collectionState.length} tipos de cartas
+            </strong>
+          </div>
         </div>
       </div>
+
+      {/* Feedback de Evolução de Nível */}
+      {upgradeBanner && (
+        <div
+          className={`flex items-center justify-between gap-3 px-4 py-3 rounded-2xl border text-xs font-bold ${
+            upgradeBanner.type === "success"
+              ? "bg-emerald-950/90 border-emerald-500 text-emerald-200 shadow-[0_0_20px_rgba(16,185,129,0.3)]"
+              : "bg-rose-950/90 border-rose-500 text-rose-200"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <ArrowUpCircle className="w-4 h-4 shrink-0" />
+            <span>{upgradeBanner.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setUpgradeBanner(null)}
+            className="text-[10px] uppercase underline opacity-80 hover:opacity-100 cursor-pointer"
+          >
+            Fechar
+          </button>
+        </div>
+      )}
 
       {/* Grid Principal: Coleção (Esquerda) + Barra Lateral (Direita) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
@@ -395,7 +492,7 @@ export function DeckbuilderView({ initialData }: DeckbuilderViewProps) {
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                {filteredCollection.map(({ card, ownedQuantity }) => {
+                {filteredCollection.map(({ card, ownedQuantity, level }) => {
                   const deckEntry = deckCardsMap.get(card.id);
                   const deckQuantity = deckEntry ? deckEntry.quantity : 0;
 
@@ -404,6 +501,10 @@ export function DeckbuilderView({ initialData }: DeckbuilderViewProps) {
                       key={card.id}
                       card={card}
                       ownedQuantity={ownedQuantity}
+                      level={level}
+                      playerGold={playerGold}
+                      onUpgrade={() => handleUpgradeCard(card.id)}
+                      isUpgrading={upgradingCardId === card.id}
                       deckQuantity={deckQuantity}
                       onAdd={() => handleAddCard(card)}
                       onRemove={() => handleRemoveCard(card.id)}

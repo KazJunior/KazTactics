@@ -7,7 +7,8 @@ import {
   checkArremesso,
   FloatingDamage,
 } from "@/lib/tactics/combat";
-import { ShieldAlert, Skull, Flame } from "lucide-react";
+import { AbilityVfxData } from "@/lib/abilities";
+import { ShieldAlert, Skull, Flame, Droplets, Sparkles, Zap } from "lucide-react";
 
 interface CombatOverlayProps {
   attacker: BoardUnit | null;
@@ -15,6 +16,7 @@ interface CombatOverlayProps {
   grid: GridTile[][];
   units: BoardUnit[];
   floatingDamages: FloatingDamage[];
+  activeAbilityVfx?: AbilityVfxData | null;
 }
 
 export function CombatOverlay({
@@ -23,9 +25,10 @@ export function CombatOverlay({
   grid,
   units,
   floatingDamages,
+  activeAbilityVfx = null,
 }: CombatOverlayProps) {
-  const cellStride = 88;
-  const halfCell = 44;
+  const cellStride = 90;
+  const halfCell = 45;
 
   const trajectory = useMemo(() => {
     if (!attacker || !targetCoord) return null;
@@ -223,34 +226,91 @@ export function CombatOverlay({
         </div>
       )}
 
-      {/* Floating Damage Numbers (Sangue & Nanquim Darkest Dungeon) */}
-      {floatingDamages.map((fd) => (
-        <div
-          key={fd.id}
-          className="absolute z-50 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none animate-floating-damage"
-          style={{
-            left: `${fd.x * cellStride + halfCell}px`,
-            top: `${fd.y * cellStride + halfCell - 20}px`,
-          }}
-        >
+      {/* Rastro de Velocidade para Habilidade DASH_JUMP */}
+      {activeAbilityVfx?.effectType === "DASH_JUMP" &&
+        activeAbilityVfx.origin &&
+        activeAbilityVfx.destination && (
+          <svg className="w-full h-full absolute inset-0 overflow-visible z-40">
+            <line
+              x1={activeAbilityVfx.origin.x * cellStride + halfCell}
+              y1={activeAbilityVfx.origin.y * cellStride + halfCell}
+              x2={activeAbilityVfx.destination.x * cellStride + halfCell}
+              y2={activeAbilityVfx.destination.y * cellStride + halfCell}
+              stroke="#22D3EE"
+              strokeWidth="8"
+              strokeLinecap="round"
+              opacity="0.45"
+              className="animate-pulse"
+            />
+            <line
+              x1={activeAbilityVfx.origin.x * cellStride + halfCell}
+              y1={activeAbilityVfx.origin.y * cellStride + halfCell}
+              x2={activeAbilityVfx.destination.x * cellStride + halfCell}
+              y2={activeAbilityVfx.destination.y * cellStride + halfCell}
+              stroke="#ECFEFF"
+              strokeWidth="3"
+              strokeDasharray="10 6"
+              strokeLinecap="round"
+            />
+          </svg>
+        )}
+
+      {/* Floating Damage & Status Numbers (Sangue, Veneno, Cura & Habilidade) */}
+      {floatingDamages.map((fd) => {
+        const isPoison = fd.variant === "POISON";
+        const isHeal = fd.variant === "HEAL";
+        const isAbility = fd.variant === "ABILITY";
+
+        return (
           <div
-            className={`px-3 py-1 border-3 shadow-[6px_6px_0px_#09080B] flex items-center gap-1.5 ${
-              fd.isFatal
-                ? "bg-[#09080B] border-[#B82923] shadow-[0_0_25px_rgba(184,41,35,0.95)]"
-                : "bg-[#140809] border-[#8C1D18] shadow-[0_0_15px_rgba(140,29,24,0.7)]"
-            }`}
+            key={fd.id}
+            className="absolute z-50 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none animate-floating-damage whitespace-nowrap"
+            style={{
+              left: `${fd.x * cellStride + halfCell}px`,
+              top: `${fd.y * cellStride + halfCell - 20}px`,
+            }}
           >
-            {fd.isFatal ? (
-              <Skull className="w-5 h-5 text-[#B82923] animate-pulse shrink-0" />
-            ) : (
-              <Flame className="w-4 h-4 text-[#F29F3D] animate-torch shrink-0" />
-            )}
-            <span className="font-gothic font-black text-2xl md:text-3xl tracking-wider text-[#FEF08A] drop-shadow-[0_2px_4px_#000]">
-              -{fd.damage}
-            </span>
+            <div
+              className={`px-3 py-1 border-3 shadow-[6px_6px_0px_#09080B] flex items-center gap-1.5 ${
+                isPoison
+                  ? "bg-[#052E16] border-[#4ADE80] shadow-[0_0_20px_rgba(74,222,128,0.9)]"
+                  : isHeal
+                  ? "bg-[#064E3B] border-[#34D399] shadow-[0_0_20px_rgba(52,211,153,0.9)]"
+                  : isAbility
+                  ? "bg-[#1E1B4B] border-[#A855F7] shadow-[0_0_22px_rgba(168,85,247,0.9)]"
+                  : fd.isFatal
+                  ? "bg-[#09080B] border-[#B82923] shadow-[0_0_25px_rgba(184,41,35,0.95)]"
+                  : "bg-[#140809] border-[#8C1D18] shadow-[0_0_15px_rgba(140,29,24,0.7)]"
+              }`}
+            >
+              {isPoison ? (
+                <Droplets className="w-4 h-4 text-[#4ADE80] animate-bounce shrink-0" />
+              ) : isHeal ? (
+                <Sparkles className="w-4 h-4 text-[#34D399] animate-pulse shrink-0" />
+              ) : isAbility ? (
+                <Zap className="w-4 h-4 text-[#C084FC] animate-pulse shrink-0" />
+              ) : fd.isFatal ? (
+                <Skull className="w-5 h-5 text-[#B82923] animate-pulse shrink-0" />
+              ) : (
+                <Flame className="w-4 h-4 text-[#F29F3D] animate-torch shrink-0" />
+              )}
+              <span
+                className={`font-gothic font-black text-xl md:text-2xl tracking-wider drop-shadow-[0_2px_4px_#000] ${
+                  isPoison
+                    ? "text-[#4ADE80]"
+                    : isHeal
+                    ? "text-[#6EE7B7]"
+                    : isAbility
+                    ? "text-[#E9D5FF]"
+                    : "text-[#FEF08A]"
+                }`}
+              >
+                {fd.label ? fd.label : isHeal ? `+${fd.damage}` : `-${fd.damage}`}
+              </span>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

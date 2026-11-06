@@ -74,8 +74,45 @@ export const cards = pgTable("cards", {
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
   username: varchar("username", { length: 50 }).notNull().unique(),
+  email: varchar("email", { length: 150 }).unique(),
+  passwordHash: text("password_hash"),
+  salt: text("salt"),
   gold: integer("gold").default(500).notNull(),
+  basicPacks: integer("basic_packs").default(0).notNull(),
+  advancedPacks: integer("advanced_packs").default(0).notNull(),
+  supremePacks: integer("supreme_packs").default(1).notNull(),
+  tutorialCompleted: boolean("tutorial_completed").default(true).notNull(),
   currentStage: integer("current_stage").default(1).notNull(),
+  avatarCardName: varchar("avatar_card_name", { length: 120 })
+    .default("Lobo Cinzento Caçador")
+    .notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/**
+ * Sessões Ativas dos Usuários
+ */
+export const sessions = pgTable("sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  token: varchar("token", { length: 255 }).notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/**
+ * Códigos Gerados para Recuperação de Senha
+ */
+export const passwordResetCodes = pgTable("password_reset_codes", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  code: varchar("code", { length: 20 }).notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  used: boolean("used").default(false).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -91,6 +128,7 @@ export const userCards = pgTable("user_cards", {
     .references(() => cards.id, { onDelete: "cascade" })
     .notNull(),
   quantity: integer("quantity").default(1).notNull(),
+  level: integer("level").default(1).notNull(),
 });
 
 /**
@@ -146,6 +184,8 @@ export const cardsRelations = relations(cards, ({ many }) => ({
 export const usersRelations = relations(users, ({ many }) => ({
   userCards: many(userCards),
   decks: many(decks),
+  sessions: many(sessions),
+  passwordResetCodes: many(passwordResetCodes),
 }));
 
 export const userCardsRelations = relations(userCards, ({ one }) => ({
@@ -178,6 +218,20 @@ export const deckCardsRelations = relations(deckCards, ({ one }) => ({
   }),
 }));
 
+export const sessionsRelations = relations(sessions, ({ one }) => ({
+  user: one(users, {
+    fields: [sessions.userId],
+    references: [users.id],
+  }),
+}));
+
+export const passwordResetCodesRelations = relations(passwordResetCodes, ({ one }) => ({
+  user: one(users, {
+    fields: [passwordResetCodes.userId],
+    references: [users.id],
+  }),
+}));
+
 // ==========================================
 // TIPOS EXPORTADOS INFERIDOS
 // ==========================================
@@ -187,6 +241,12 @@ export type NewCard = InferInsertModel<typeof cards>;
 
 export type User = InferSelectModel<typeof users>;
 export type NewUser = InferInsertModel<typeof users>;
+
+export type Session = InferSelectModel<typeof sessions>;
+export type NewSession = InferInsertModel<typeof sessions>;
+
+export type PasswordResetCode = InferSelectModel<typeof passwordResetCodes>;
+export type NewPasswordResetCode = InferInsertModel<typeof passwordResetCodes>;
 
 export type UserCard = InferSelectModel<typeof userCards>;
 export type NewUserCard = InferInsertModel<typeof userCards>;

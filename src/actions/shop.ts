@@ -2,23 +2,47 @@
 
 import { db } from "@/db";
 import { cards, users, userCards, Card } from "@/db/schema";
+import { getEffectiveUser } from "@/lib/auth";
 import { eq, sql, inArray } from "drizzle-orm";
-import { rollRarity } from "@/lib/gacha";
-import { DrawnCard, PackOpeningResult } from "@/types";
+import { rollRarityForPack, normalizePackType } from "@/lib/gacha";
+import {
+  rollPackCopiesByRarity,
+  applyCardLevelScaling,
+} from "@/lib/cardProgression";
+import { DrawnCard, PackOpeningResult, PackKind } from "@/types";
 import { PACK_PRICES } from "@/lib/constants";
+import { syncExpandedCardsToDb } from "@/lib/syncExpandedCards";
 import { revalidatePath } from "next/cache";
+
+async function ensureShopSchemaColumns() {
+  await db.execute(
+    sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "basic_packs" integer DEFAULT 0 NOT NULL;`
+  );
+  await db.execute(
+    sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "advanced_packs" integer DEFAULT 0 NOT NULL;`
+  );
+  await db.execute(
+    sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "supreme_packs" integer DEFAULT 1 NOT NULL;`
+  );
+  await db.execute(
+    sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "tutorial_completed" boolean DEFAULT true NOT NULL;`
+  );
+  await db.execute(
+    sql`ALTER TABLE "user_cards" ADD COLUMN IF NOT EXISTS "level" integer DEFAULT 1 NOT NULL;`
+  );
+  await syncExpandedCardsToDb();
+}
 
 /**
  * Retorna os dados do jogador atual para a Loja
  */
 export async function getPlayerShopData() {
   try {
-    const userList = await db.select().from(users).limit(1);
-    if (userList.length === 0) {
+    await ensureShopSchemaColumns();
+    const user = await getEffectiveUser();
+    if (!user) {
       return null;
     }
-
-    const user = userList[0];
     const collection = await db
       .select({ count: sql<number>`count(*)` })
       .from(userCards)
@@ -37,9 +61,10 @@ export async function getPlayerShopData() {
 /**
  * Adiciona ouro de demonstração para testes rápidos do jogador
  */
-export async function addTestGoldAction(amount = 200) {
+export async function addTestGoldAction(amount = 2000) {
   try {
-    const [user] = await db.select().from(users).limit(1);
+    await ensureShopSchemaColumns();
+    const user = await getEffectiveUser();
     if (!user) return { success: false, error: "Usuário não encontrado" };
 
     const [updatedUser] = await db
@@ -62,34 +87,99 @@ export async function addTestGoldAction(amount = 200) {
 }
 
 /**
- * Processa a compra e abertura de um pacote de 5 cartas
+ * Concede 1 Pacote Supremo por recompensa especial / evento
+ */
+export async function grantSpecialSupremePackAction(amount = 1) {
+  try {
+    await ensureShopSchemaColumns();
+    const user = await getEffectiveUser();
+    if (!user) return { success: false, error: "Usuário não encontrado" };
+
+    const [updatedUser] = await db
+      .update(users)
+      .set({ supremePacks: sql`${users.supremePacks} + ${amount}` })
+      .where(eq(users.id, user.id))
+      .returning();
+
+    try {
+      revalidatePath("/shop");
+      revalidatePath("/");
+    } catch {
+      // ignore
+    }
+    return {
+      success: true,
+      newSupremePacks: updatedUser.supremePacks,
+    };
+  } catch (error) {
+    console.error("Erro ao conceder Pacote Supremo:", error);
+    return { success: false, error: "Falha ao conceder Pacote Supremo" };
+  }
+}
+
+/**
+ * Processa a obtenção e abertura de um pacote de 5 cartas:
+ * - BASIC: 100 Ouro (0.5% Lendária, 5% Épica)
+ * - ADVANCED: 350 Ouro (2% Lendária, 10% Épica)
+ * - SUPREME: Especial / Não comprável com Ouro (10% Lendária, 90% Épica)
  */
 export async function buyPackAction(
-  packType: "STANDARD" | "MYSTIC" = "STANDARD"
+  packType: PackKind = "BASIC"
 ): Promise<PackOpeningResult> {
   try {
-    const cost = PACK_PRICES[packType];
+    await ensureShopSchemaColumns();
+    const normalizedType = normalizePackType(packType);
+    const isSupreme = normalizedType === "SUPREME";
+    const cost = isSupreme ? 0 : PACK_PRICES[normalizedType];
 
     // 1. Verificar usuário
-    const [user] = await db.select().from(users).limit(1);
+    const user = await getEffectiveUser();
     if (!user) {
       return {
         success: false,
-        error: "Jogador não encontrado no sistema. Por favor, execute o seed inicial.",
+        error:
+          "Jogador não encontrado no sistema. Por favor, execute o seed inicial.",
         cards: [],
         remainingGold: 0,
-        packType,
+        remainingSupremePacks: 0,
+        packType: normalizedType,
       };
     }
 
-    // 2. Verificar saldo de ouro
-    if (user.gold < cost) {
+    const currentBasicPacks = user.basicPacks ?? 0;
+    const currentAdvancedPacks = user.advancedPacks ?? 0;
+    const currentSupremePacks = user.supremePacks ?? 0;
+    const useFreeBasicPack = normalizedType === "BASIC" && currentBasicPacks > 0;
+    const useFreeAdvancedPack =
+      normalizedType === "ADVANCED" && currentAdvancedPacks > 0;
+
+    // 2. Validar requisito de abertura (Pacote Supremo, Pacote Grátis do Tutorial ou Ouro)
+    if (isSupreme) {
+      if (currentSupremePacks <= 0) {
+        return {
+          success: false,
+          error:
+            "Você não possui Pacotes Supremos disponíveis! O Pacote Supremo não pode ser comprado com Ouro — conquiste vitórias especiais na Campanha PvE ou resgate em eventos para obtê-lo.",
+          cards: [],
+          remainingGold: user.gold,
+          remainingBasicPacks: currentBasicPacks,
+          remainingAdvancedPacks: currentAdvancedPacks,
+          remainingSupremePacks: 0,
+          packType: normalizedType,
+        };
+      }
+    } else if (!useFreeBasicPack && !useFreeAdvancedPack && user.gold < cost) {
       return {
         success: false,
-        error: `Ouro insuficiente! Você precisa de ${cost} de Ouro, mas possui apenas ${user.gold}. Conquiste vitórias na Campanha PvE para ganhar mais espólios!`,
+        error: `Ouro insuficiente! Você precisa de ${cost} de Ouro para o ${
+          normalizedType === "ADVANCED" ? "Pacote Avançado" : "Pacote Básico"
+        }, mas possui apenas ${user.gold}.`,
         cards: [],
         remainingGold: user.gold,
-        packType,
+        remainingBasicPacks: currentBasicPacks,
+        remainingAdvancedPacks: currentAdvancedPacks,
+        remainingSupremePacks: currentSupremePacks,
+        packType: normalizedType,
       };
     }
 
@@ -101,7 +191,8 @@ export async function buyPackAction(
         error: "Nenhuma carta cadastrada no catálogo do jogo.",
         cards: [],
         remainingGold: user.gold,
-        packType,
+        remainingSupremePacks: currentSupremePacks,
+        packType: normalizedType,
       };
     }
 
@@ -120,15 +211,12 @@ export async function buyPackAction(
       }
     }
 
-    // 4. Sortear 5 cartas
+    // 4. Sortear 5 cartas usando a tabela de probabilidades do pacote
     const selectedCards: Card[] = [];
     for (let i = 0; i < 5; i++) {
-      // Se for pacote místico, a 5ª carta tem garantia de no mínimo Raro
-      const isGuaranteed = packType === "MYSTIC" && i === 4;
-      const rolledRarity = rollRarity(isGuaranteed ? "RARO" : undefined);
+      const rolledRarity = rollRarityForPack(normalizedType);
 
       let pool = cardsByRarity[rolledRarity];
-      // Fallback de segurança se uma categoria estiver vazia
       if (!pool || pool.length === 0) {
         pool = allCatalogCards;
       }
@@ -137,25 +225,90 @@ export async function buyPackAction(
       selectedCards.push(pool[randomIndex]);
     }
 
-    // 5. Execução Segura e Atômica no NeonDB (HTTP Serverless)
-    // Deduz o ouro apenas se o jogador possuir saldo suficiente (proteção contra race conditions)
-    const updatedUsers = await db
-      .update(users)
-      .set({ gold: sql`${users.gold} - ${cost}` })
-      .where(sql`${users.id} = ${user.id} AND ${users.gold} >= ${cost}`)
-      .returning();
+    // 5. Débito Atômico no Banco (Pacote Grátis em Posse, SupremePacks ou Ouro)
+    let updatedUser: typeof users.$inferSelect;
 
-    if (updatedUsers.length === 0) {
-      return {
-        success: false,
-        error: "Falha na transação: Ouro insuficiente no momento do débito.",
-        cards: [],
-        remainingGold: user.gold,
-        packType,
-      };
+    if (isSupreme) {
+      const updatedUsers = await db
+        .update(users)
+        .set({ supremePacks: sql`${users.supremePacks} - 1` })
+        .where(sql`${users.id} = ${user.id} AND ${users.supremePacks} >= 1`)
+        .returning();
+
+      if (updatedUsers.length === 0) {
+        return {
+          success: false,
+          error: "Nenhum Pacote Supremo disponível no momento da abertura.",
+          cards: [],
+          remainingGold: user.gold,
+          remainingBasicPacks: currentBasicPacks,
+          remainingAdvancedPacks: currentAdvancedPacks,
+          remainingSupremePacks: 0,
+          packType: normalizedType,
+        };
+      }
+      updatedUser = updatedUsers[0];
+    } else if (useFreeBasicPack) {
+      const updatedUsers = await db
+        .update(users)
+        .set({ basicPacks: sql`${users.basicPacks} - 1` })
+        .where(sql`${users.id} = ${user.id} AND ${users.basicPacks} >= 1`)
+        .returning();
+
+      if (updatedUsers.length === 0) {
+        return {
+          success: false,
+          error: "Nenhum Pacote Básico grátis disponível no momento da abertura.",
+          cards: [],
+          remainingGold: user.gold,
+          remainingBasicPacks: 0,
+          remainingAdvancedPacks: currentAdvancedPacks,
+          remainingSupremePacks: currentSupremePacks,
+          packType: normalizedType,
+        };
+      }
+      updatedUser = updatedUsers[0];
+    } else if (useFreeAdvancedPack) {
+      const updatedUsers = await db
+        .update(users)
+        .set({ advancedPacks: sql`${users.advancedPacks} - 1` })
+        .where(sql`${users.id} = ${user.id} AND ${users.advancedPacks} >= 1`)
+        .returning();
+
+      if (updatedUsers.length === 0) {
+        return {
+          success: false,
+          error: "Nenhum Pacote Avançado grátis disponível no momento da abertura.",
+          cards: [],
+          remainingGold: user.gold,
+          remainingBasicPacks: currentBasicPacks,
+          remainingAdvancedPacks: 0,
+          remainingSupremePacks: currentSupremePacks,
+          packType: normalizedType,
+        };
+      }
+      updatedUser = updatedUsers[0];
+    } else {
+      const updatedUsers = await db
+        .update(users)
+        .set({ gold: sql`${users.gold} - ${cost}` })
+        .where(sql`${users.id} = ${user.id} AND ${users.gold} >= ${cost}`)
+        .returning();
+
+      if (updatedUsers.length === 0) {
+        return {
+          success: false,
+          error: "Falha na transação: Ouro insuficiente no momento do débito.",
+          cards: [],
+          remainingGold: user.gold,
+          remainingBasicPacks: currentBasicPacks,
+          remainingAdvancedPacks: currentAdvancedPacks,
+          remainingSupremePacks: currentSupremePacks,
+          packType: normalizedType,
+        };
+      }
+      updatedUser = updatedUsers[0];
     }
-
-    const updatedUser = updatedUsers[0];
 
     // Buscar cartas já possuídas pelo jogador entre as selecionadas
     const drawnCardIds = selectedCards.map((c) => c.id);
@@ -169,19 +322,21 @@ export async function buyPackAction(
         )}`
       );
 
-    const existingMap = new Map<string, typeof existingUserCards[0]>();
+    const existingMap = new Map<string, (typeof existingUserCards)[0]>();
     for (const uc of existingUserCards) {
       existingMap.set(uc.cardId, uc);
     }
 
     const finalDrawnCards: DrawnCard[] = [];
 
-    // Atualizar coleção (user_cards)
+    // Atualizar coleção (user_cards) com múltiplas cópias baseadas na raridade
     for (const card of selectedCards) {
       const existing = existingMap.get(card.id);
+      const copiesGranted = rollPackCopiesByRarity(card.rarity, normalizedType);
 
       if (existing) {
-        const nextQuantity = existing.quantity + 1;
+        const nextQuantity = existing.quantity + copiesGranted;
+        const currentLevel = existing.level || 1;
         await db
           .update(userCards)
           .set({ quantity: nextQuantity })
@@ -189,10 +344,13 @@ export async function buyPackAction(
 
         existing.quantity = nextQuantity;
 
+        const scaledCard = applyCardLevelScaling(card, currentLevel);
         finalDrawnCards.push({
-          ...card,
+          ...scaledCard,
           isNew: false,
           newQuantity: nextQuantity,
+          copiesGranted,
+          level: currentLevel,
         });
       } else {
         const [newUserCard] = await db
@@ -200,16 +358,20 @@ export async function buyPackAction(
           .values({
             userId: user.id,
             cardId: card.id,
-            quantity: 1,
+            quantity: copiesGranted,
+            level: 1,
           })
           .returning();
 
         existingMap.set(card.id, newUserCard);
 
+        const scaledCard = applyCardLevelScaling(card, 1);
         finalDrawnCards.push({
-          ...card,
+          ...scaledCard,
           isNew: true,
-          newQuantity: 1,
+          newQuantity: copiesGranted,
+          copiesGranted,
+          level: 1,
         });
       }
     }
@@ -218,14 +380,17 @@ export async function buyPackAction(
       revalidatePath("/shop");
       revalidatePath("/");
     } catch {
-      // Ignora erro de revalidação fora do ciclo do Next.js (ex: scripts CLI)
+      // Ignora erro de revalidação fora do ciclo do Next.js
     }
 
     return {
       success: true,
       cards: finalDrawnCards,
       remainingGold: updatedUser.gold,
-      packType,
+      remainingBasicPacks: updatedUser.basicPacks ?? 0,
+      remainingAdvancedPacks: updatedUser.advancedPacks ?? 0,
+      remainingSupremePacks: updatedUser.supremePacks ?? 0,
+      packType: normalizedType,
     };
   } catch (error) {
     console.error("Erro na transação de abertura de pacote:", error);
@@ -234,8 +399,8 @@ export async function buyPackAction(
       error: "Ocorreu um erro ao processar a abertura do pacote no servidor.",
       cards: [],
       remainingGold: 0,
+      remainingSupremePacks: 0,
       packType,
     };
   }
 }
-

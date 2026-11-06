@@ -16,13 +16,20 @@ export type AttackType = "LINE_OF_SIGHT" | "ARREMESSO";
 export interface DrawnCard extends Card {
   isNew: boolean;
   newQuantity: number;
+  copiesGranted?: number;
+  level?: number;
 }
+
+export type PackKind = "BASIC" | "ADVANCED" | "SUPREME" | "STANDARD" | "MYSTIC";
 
 export interface PackOpeningResult {
   success: boolean;
   error?: string;
   cards: DrawnCard[];
   remainingGold: number;
-  packType: "STANDARD" | "MYSTIC";
+  remainingBasicPacks?: number;
+  remainingAdvancedPacks?: number;
+  remainingSupremePacks?: number;
+  packType: PackKind;
 }
 

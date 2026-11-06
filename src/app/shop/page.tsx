@@ -16,6 +16,9 @@ export default async function ShopPage() {
 
   const user = shopData?.user || {
     gold: 500,
+    basicPacks: 0,
+    advancedPacks: 0,
+    supremePacks: 1,
     username: "EstrategistaKaz",
   };
 
@@ -26,6 +29,9 @@ export default async function ShopPage() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12">
         <PackOpeningScreen
           initialGold={user.gold}
+          initialBasicPacks={user.basicPacks ?? 0}
+          initialAdvancedPacks={user.advancedPacks ?? 0}
+          initialSupremePacks={user.supremePacks ?? 1}
           username={user.username}
         />
       </main>

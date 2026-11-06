@@ -1,41 +1,73 @@
-import { Rarity } from "@/types";
+import { Rarity, PackKind } from "@/types";
 
-export interface RarityWeight {
-  rarity: "COMUM" | "INCOMUM" | "RARO" | "EPICO" | "LENDARIO";
-  weight: number;
+export interface RarityProbability {
+  rarity: Rarity;
+  chance: number;
 }
 
-export const STANDARD_PROBABILITIES: {
-  rarity: "COMUM" | "INCOMUM" | "RARO" | "EPICO" | "LENDARIO";
-  chance: number;
-}[] = [
-  { rarity: "COMUM", chance: 0.55 },
-  { rarity: "INCOMUM", chance: 0.25 },
-  { rarity: "RARO", chance: 0.12 },
-  { rarity: "EPICO", chance: 0.06 },
-  { rarity: "LENDARIO", chance: 0.02 },
-];
+/**
+ * Probabilidades oficiais por tipo de pacote:
+ * - BASIC (Pacote Básico): 0.5% Lendária, 5% Épica, 14.5% Rara, 25% Incomum, 55% Comum
+ * - ADVANCED (Pacote Avançado): 2% Lendária, 10% Épica, 23% Rara, 30% Incomum, 35% Comum
+ * - SUPREME (Pacote Supremo - Especial): 10% Lendária, 90% Épica (0% Comum/Incomum/Rara)
+ */
+export const PACK_PROBABILITIES: Record<"BASIC" | "ADVANCED" | "SUPREME", RarityProbability[]> = {
+  BASIC: [
+    { rarity: "COMUM", chance: 0.55 },
+    { rarity: "INCOMUM", chance: 0.25 },
+    { rarity: "RARO", chance: 0.145 },
+    { rarity: "EPICO", chance: 0.05 },
+    { rarity: "LENDARIO", chance: 0.005 },
+  ],
+  ADVANCED: [
+    { rarity: "COMUM", chance: 0.35 },
+    { rarity: "INCOMUM", chance: 0.30 },
+    { rarity: "RARO", chance: 0.23 },
+    { rarity: "EPICO", chance: 0.10 },
+    { rarity: "LENDARIO", chance: 0.02 },
+  ],
+  SUPREME: [
+    { rarity: "EPICO", chance: 0.90 },
+    { rarity: "LENDARIO", chance: 0.10 },
+  ],
+};
 
-export function rollRarity(
-  guaranteedMinRarity?: "RARO"
-): "COMUM" | "INCOMUM" | "RARO" | "EPICO" | "LENDARIO" {
+export const STANDARD_PROBABILITIES = PACK_PROBABILITIES.BASIC;
+
+export function normalizePackType(
+  packType?: PackKind
+): "BASIC" | "ADVANCED" | "SUPREME" {
+  if (packType === "SUPREME") return "SUPREME";
+  if (packType === "ADVANCED" || packType === "MYSTIC") return "ADVANCED";
+  return "BASIC";
+}
+
+/**
+ * Sorteia a raridade de uma carta de acordo com a tabela de probabilidades do pacote
+ */
+export function rollRarityForPack(packType: PackKind = "BASIC"): Rarity {
+  const normalized = normalizePackType(packType);
+  const table = PACK_PROBABILITIES[normalized];
   const rand = Math.random();
 
-  if (guaranteedMinRarity === "RARO") {
-    if (rand < 0.6) return "RARO";
-    if (rand < 0.9) return "EPICO";
-    return "LENDARIO";
-  }
-
   let accumulated = 0;
-  for (const item of STANDARD_PROBABILITIES) {
+  for (const item of table) {
     accumulated += item.chance;
     if (rand <= accumulated) {
       return item.rarity;
     }
   }
 
-  return "COMUM";
+  return table[table.length - 1].rarity;
+}
+
+export function rollRarity(
+  guaranteedMinRarity?: "RARO"
+): "COMUM" | "INCOMUM" | "RARO" | "EPICO" | "LENDARIO" {
+  if (guaranteedMinRarity === "RARO") {
+    return rollRarityForPack("ADVANCED");
+  }
+  return rollRarityForPack("BASIC");
 }
 
 /**

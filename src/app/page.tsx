@@ -1,6 +1,9 @@
 import { db } from "@/db";
 import { cards, users, campaignStages, decks, deckCards } from "@/db/schema";
 import { Navbar } from "@/components/Navbar";
+import { getEffectiveUser } from "@/lib/auth";
+import { ensureTutorialAndPacksColumns } from "@/actions/tutorial";
+import { NewAccountTutorialBanner } from "@/components/tutorial/NewAccountTutorialBanner";
 import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { CardComponent } from "@/components/cards/CardComponent";
@@ -30,17 +33,30 @@ export default async function HomePage() {
   let activeDeckInfo = null;
 
   try {
-    const [fetchedCards, fetchedUsers, fetchedStages, fetchedDecks] =
-      await Promise.all([
-        db.select().from(cards),
-        db.select().from(users).limit(1),
-        db.select().from(campaignStages),
-        db.select().from(decks).where(eq(decks.isActive, true)).limit(1),
-      ]);
+    await ensureTutorialAndPacksColumns();
+    const [fetchedCards, currentUser, fetchedStages] = await Promise.all([
+      db.select().from(cards),
+      getEffectiveUser(),
+      db.select().from(campaignStages),
+    ]);
 
     allCards = fetchedCards;
-    user = fetchedUsers[0] || null;
+    user = currentUser;
     stages = fetchedStages;
+
+    let fetchedDecks: (typeof decks.$inferSelect)[] = [];
+    if (user) {
+      fetchedDecks = await db
+        .select()
+        .from(decks)
+        .where(eq(decks.userId, user.id))
+        .limit(1);
+
+      const activeMatch = fetchedDecks.find((d) => d.isActive) || fetchedDecks[0];
+      if (activeMatch) {
+        fetchedDecks = [activeMatch];
+      }
+    }
 
     if (fetchedDecks[0]) {
       const d = fetchedDecks[0];
@@ -83,6 +99,9 @@ export default async function HomePage() {
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12 space-y-12">
+        {/* Banner de Tutorial Exclusivo para Contas Novas (exibido apenas se tutorialCompleted === false) */}
+        {user && user.tutorialCompleted === false && <NewAccountTutorialBanner />}
+
         {/* ======================================================== */}
         {/* HERO: BOAS-VINDAS & PAINEL DE CONTROLE DO COMANDANTE */}
         {/* ======================================================== */}

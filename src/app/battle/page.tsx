@@ -1,8 +1,10 @@
 import { db } from "@/db";
-import { cards, users, campaignStages } from "@/db/schema";
+import { cards, users, userCards, campaignStages } from "@/db/schema";
 import { Navbar } from "@/components/Navbar";
 import { BattlefieldView } from "@/components/battle/BattlefieldView";
-import { eq } from "drizzle-orm";
+import { getEffectiveUser } from "@/lib/auth";
+import { applyCardLevelScaling } from "@/lib/cardProgression";
+import { eq, sql } from "drizzle-orm";
 import { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -28,9 +30,9 @@ export default async function BattlePage({ searchParams }: BattlePageProps) {
   let currentStage = null;
 
   try {
-    const [fetchedCards, fetchedUsers, fetchedStages] = await Promise.all([
+    const [fetchedCards, currentUser, fetchedStages] = await Promise.all([
       db.select().from(cards),
-      db.select().from(users).limit(1),
+      getEffectiveUser(),
       db
         .select()
         .from(campaignStages)
@@ -39,10 +41,26 @@ export default async function BattlePage({ searchParams }: BattlePageProps) {
     ]);
 
     allCards = fetchedCards;
-    user = fetchedUsers[0] || null;
+    user = currentUser;
     currentStage = fetchedStages[0] || null;
 
-    // Fallback se a fase solicitada não existir
+    if (user) {
+      await db.execute(
+        sql`ALTER TABLE "user_cards" ADD COLUMN IF NOT EXISTS "level" integer DEFAULT 1 NOT NULL;`
+      );
+      const ownedRows = await db
+        .select()
+        .from(userCards)
+        .where(eq(userCards.userId, user.id));
+      const levelMap = new Map<string, number>();
+      for (const row of ownedRows) {
+        levelMap.set(row.cardId, row.level || 1);
+      }
+      allCards = fetchedCards.map((c) =>
+        applyCardLevelScaling(c, levelMap.get(c.id) || 1)
+      );
+    }
+
     if (!currentStage) {
       const fallback = await db.select().from(campaignStages).limit(1);
       currentStage = fallback[0] || null;
@@ -52,19 +70,21 @@ export default async function BattlePage({ searchParams }: BattlePageProps) {
   }
 
   return (
-    <div className="min-h-screen text-[#F8FAFC]">
+    <div className="relative min-h-screen text-[#F8FAFC] overflow-hidden bg-[#09090B]">
       <Navbar
         gold={user?.gold ?? 500}
         username={user?.username ?? "EstrategistaKaz"}
+        initialAvatarName={user?.avatarCardName ?? "Lobo Cinzento Caçador"}
       />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12">
+      <main className="relative z-10 max-w-[1920px] mx-auto px-2 sm:px-4 lg:px-6 py-2 md:py-3">
         <BattlefieldView
           sampleCards={allCards}
           stageName={currentStage?.name}
           stageNumber={currentStage?.stageNumber}
           initialAiHp={currentStage?.aiCoreHp}
           goldReward={currentStage?.goldReward}
+          initialAvatarName={user?.avatarCardName ?? "Lobo Cinzento Caçador"}
         />
       </main>
     </div>

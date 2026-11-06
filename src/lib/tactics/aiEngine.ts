@@ -1,4 +1,9 @@
-import { BoardUnit, BoardCore, GridTile } from "@/types/game";
+import {
+  BoardUnit,
+  BoardCore,
+  GridTile,
+  MAX_UNIT_ACTIONS_PER_TURN,
+} from "@/types/game";
 import { Card } from "@/db/schema";
 import {
   calculateTurnMana,
@@ -11,7 +16,15 @@ import {
   getValidMovementTiles,
   getValidAttackTiles,
 } from "./grid";
-import { checkLineOfSight, FloatingDamage } from "./combat";
+import { checkLineOfSight, FloatingDamage, getEffectiveUnitDamage } from "./combat";
+import {
+  getCreatureAbility,
+  getValidAbilityTargetTiles,
+  getAbilityImpactZoneTiles,
+  executeCreatureAbility,
+  processTurnStartAbilitiesAndStatuses,
+  AbilityVfxData,
+} from "@/lib/abilities";
 
 export interface AiTurnResult {
   nextAiMana: number;
@@ -21,6 +34,7 @@ export interface AiTurnResult {
   updatedCores: BoardCore[];
   actionLogs: string[];
   floatingDamages: FloatingDamage[];
+  abilityVfxList: AbilityVfxData[];
 }
 
 /**
@@ -37,6 +51,7 @@ export function executeAiTurn(
 ): AiTurnResult {
   const actionLogs: string[] = [];
   const floatingDamages: FloatingDamage[] = [];
+  const abilityVfxList: AbilityVfxData[] = [];
 
   // 1. Ganho de Mana e Compra de Carta da IA (+3 Mana, teto 15)
   let aiMana = calculateTurnMana(currentAiMana);
@@ -50,12 +65,11 @@ export function executeAiTurn(
     actionLogs.push(`[IA] Comprou uma carta dos reforços.`);
   }
 
-  let updatedUnits = units.map((u) => {
-    if (u.owner === "AI") {
-      return { ...u, hasMoved: false, hasAttacked: false };
-    }
-    return u;
-  });
+  // Processa início de turno da IA: reduz cooldowns em -1, aplica tick de Veneno e atualiza status
+  const turnStartStatus = processTurnStartAbilitiesAndStatuses("AI", units);
+  let updatedUnits = turnStartStatus.updatedUnits;
+  floatingDamages.push(...turnStartStatus.poisonDamages);
+  actionLogs.push(...turnStartStatus.logs);
 
   let updatedCores = [...cores];
   const playerCore = updatedCores.find((c) => c.owner === "PLAYER")!;
@@ -160,6 +174,10 @@ export function executeAiTurn(
           maxHp: monsterToSummon.hp || 80,
           hasMoved: false,
           hasAttacked: false,
+          actionsRemaining: MAX_UNIT_ACTIONS_PER_TURN,
+          abilityCooldown: 0,
+          usedAbilityThisTurn: false,
+          statusEffects: [],
         };
 
         updatedUnits.push(newAiUnit);
@@ -173,164 +191,208 @@ export function executeAiTurn(
     }
   }
 
-  // ========================================================
-  // FASE 4: MOVIMENTO E ATAQUE (HEURÍSTICA TÁTICA)
-  // ========================================================
-  const currentAiUnits = updatedUnits.filter((u) => u.owner === "AI");
-
-  for (const aiUnit of currentAiUnits) {
-    // 1. CHECAGEM DE ATAQUE ANTES DE MOVER (se já estiver no alcance)
-    let attackTargets = getValidAttackTiles(aiUnit, grid, updatedUnits);
-
-    // Heurística de Alvo:
-    // Prioridade 1: Atacar Núcleo do Jogador se estiver no alcance
-    const canHitPlayerCore = attackTargets.some(
-      (t) => t.x === playerCore.x && t.y === playerCore.y
-    );
-
-    if (canHitPlayerCore) {
-      const damage = aiUnit.card.damage || 25;
-      playerCore.currentHp = Math.max(playerCore.currentHp - damage, 0);
-      aiUnit.hasAttacked = true;
-
-      floatingDamages.push({
-        id: `ai_atk_core_${Date.now()}_${aiUnit.id}`,
-        x: playerCore.x,
-        y: playerCore.y,
-        damage,
-        isFatal: playerCore.currentHp <= 0,
-      });
-
-      actionLogs.push(
-        `[IA] "${aiUnit.card.name}" atacou diretamente o Núcleo Aliado causando ${damage} de dano!`
-      );
-      continue;
+  // Função auxiliar para a IA tentar usar a Habilidade Única de uma criatura quando pronta
+  const tryUseAiUnitAbility = (aiUnitId: string): boolean => {
+    const unit = updatedUnits.find((u) => u.id === aiUnitId && u.owner === "AI");
+    if (!unit) return false;
+    if (
+      (unit.actionsRemaining ?? MAX_UNIT_ACTIONS_PER_TURN) <= 0 ||
+      (unit.abilityCooldown ?? 0) > 0
+    ) {
+      return false;
     }
 
-    // Prioridade 2: Eliminar uma criatura do jogador com dano letal
-    const playerUnitsInReach = updatedUnits.filter(
-      (u) =>
-        u.owner === "PLAYER" &&
-        attackTargets.some((t) => t.x === u.x && t.y === u.y)
-    );
-
-    const lethalTarget = playerUnitsInReach.find(
-      (u) => u.currentHp <= (aiUnit.card.damage || 0)
-    );
-
-    if (lethalTarget) {
-      const damage = aiUnit.card.damage || 25;
-      lethalTarget.currentHp -= damage;
-      aiUnit.hasAttacked = true;
-
-      floatingDamages.push({
-        id: `ai_atk_lethal_${Date.now()}_${aiUnit.id}`,
-        x: lethalTarget.x,
-        y: lethalTarget.y,
-        damage,
-        isFatal: true,
-      });
-
-      actionLogs.push(
-        `[IA] "${aiUnit.card.name}" executou golpe letal em "${lethalTarget.card.name}" causando ${damage} de dano!`
-      );
-
-      updatedUnits = updatedUnits.filter((u) => u.currentHp > 0);
-      continue;
-    }
-
-    // Se houver qualquer inimigo no alcance, ataca o de menor HP
-    if (playerUnitsInReach.length > 0) {
-      playerUnitsInReach.sort((a, b) => a.currentHp - b.currentHp);
-      const chosenTarget = playerUnitsInReach[0];
-      const damage = aiUnit.card.damage || 25;
-      chosenTarget.currentHp -= damage;
-      aiUnit.hasAttacked = true;
-
-      floatingDamages.push({
-        id: `ai_atk_focus_${Date.now()}_${aiUnit.id}`,
-        x: chosenTarget.x,
-        y: chosenTarget.y,
-        damage,
-        isFatal: chosenTarget.currentHp <= 0,
-      });
-
-      actionLogs.push(
-        `[IA] "${aiUnit.card.name}" focou "${chosenTarget.card.name}" causando ${damage} de dano.`
-      );
-
-      updatedUnits = updatedUnits.filter((u) => u.currentHp > 0);
-      continue;
-    }
-
-    // ========================================================
-    // SE NÃO ATINGE NINGUÉM: MOVIMENTAR-SE INTELIGENTEMENTE
-    // ========================================================
-    const validMoves = getValidMovementTiles(
-      aiUnit,
+    const ability = getCreatureAbility(unit.card.name, unit.card.type);
+    if (!ability) return false;
+    const validTargets = getValidAbilityTargetTiles(
+      unit,
+      ability,
       grid,
-      updatedUnits,
-      updatedCores
+      updatedUnits
     );
+    if (validTargets.length === 0) return false;
 
-    if (validMoves.length > 0 && !aiUnit.hasMoved) {
-      if (aiUnit.card.attackType === "ARREMESSO") {
-        // Heurística de ARREMESSO: Buscar ficar adjacente a um OBSTACLE (cobertura)
-        // enquanto reduz a distância em relação ao exército do jogador!
-        validMoves.sort((a, b) => {
-          // Checar se 'a' tem obstáculo adjacente
-          const aHasObstacle = [
-            { x: a.x + 1, y: a.y },
-            { x: a.x - 1, y: a.y },
-            { x: a.x, y: a.y + 1 },
-            { x: a.x, y: a.y - 1 },
-          ].some((pos) => grid[pos.y]?.[pos.x]?.type === "OBSTACLE");
+    const playerUnitsNow = updatedUnits.filter((u) => u.owner === "PLAYER");
+    let chosenCoord: { x: number; y: number } | null = null;
 
-          const bHasObstacle = [
-            { x: b.x + 1, y: b.y },
-            { x: b.x - 1, y: b.y },
-            { x: b.x, y: b.y + 1 },
-            { x: b.x, y: b.y - 1 },
-          ].some((pos) => grid[pos.y]?.[pos.x]?.type === "OBSTACLE");
+    // 1. Habilidades em Área (AOE_DAMAGE / SELF_AOE / AREA_TARGET):
+    // Mirar na casa que atinja o maior número possível de unidades do jogador
+    if (
+      ability.effectType === "AOE_DAMAGE" ||
+      ability.targetType === "AREA_TARGET" ||
+      (ability.targetType === "SELF_AOE" && ability.effectType !== "HEAL_BUFF")
+    ) {
+      let bestCount = 0;
+      let bestScore = -1;
 
-          if (aHasObstacle && !bHasObstacle) return -1;
-          if (!aHasObstacle && bHasObstacle) return 1;
+      const candidateCoords =
+        ability.targetType === "SELF_AOE"
+          ? [{ x: unit.x, y: unit.y }]
+          : validTargets;
 
-          // Se empatar, aproxima-se do centro (x menor)
-          return a.x - b.x;
+      for (const coord of candidateCoords) {
+        const zone = getAbilityImpactZoneTiles(
+          unit,
+          ability,
+          coord.x,
+          coord.y,
+          grid
+        );
+        const hitPlayers = playerUnitsNow.filter((pu) =>
+          zone.some((z) => z.x === pu.x && z.y === pu.y)
+        );
+        if (hitPlayers.length > 0) {
+          const score =
+            hitPlayers.length * 100 +
+            hitPlayers.reduce(
+              (acc, pu) => acc + (pu.card.damage || 20) + pu.currentHp * 0.5,
+              0
+            );
+          if (hitPlayers.length > bestCount || score > bestScore) {
+            bestCount = hitPlayers.length;
+            bestScore = score;
+            chosenCoord = coord;
+          }
+        }
+      }
+    }
+    // 2. Habilidades de Salto em Casa Vazia (DASH_JUMP + EMPTY_TILE):
+    // Avançar em direção ao Núcleo do jogador ou escapar de bloqueios
+    else if (
+      ability.effectType === "DASH_JUMP" &&
+      ability.targetType === "EMPTY_TILE"
+    ) {
+      const currentDistToCore = Math.hypot(
+        unit.x - playerCore.x,
+        unit.y - playerCore.y
+      );
+      const sorted = [...validTargets].sort((a, b) => {
+        const distA = Math.hypot(a.x - playerCore.x, a.y - playerCore.y);
+        const distB = Math.hypot(b.x - playerCore.x, b.y - playerCore.y);
+        return distA - distB;
+      });
+      if (sorted.length > 0) {
+        const bestJump = sorted[0];
+        const newDist = Math.hypot(
+          bestJump.x - playerCore.x,
+          bestJump.y - playerCore.y
+        );
+        if (newDist < currentDistToCore - 0.5) {
+          chosenCoord = bestJump;
+        }
+      }
+    }
+    // 3. Habilidades em Inimigo Único (POISON, WEB_ROOT, KNOCKBACK ou DASH_JUMP em ENEMY):
+    // Priorizar a criatura do jogador com maior HP/Dano ao alcance
+    else if (ability.targetType === "ENEMY") {
+      const reachableEnemies = playerUnitsNow.filter((pu) =>
+        validTargets.some((t) => t.x === pu.x && t.y === pu.y)
+      );
+      if (reachableEnemies.length > 0) {
+        reachableEnemies.sort((a, b) => {
+          const scoreA = a.currentHp + (a.card.damage || 25) * 2;
+          const scoreB = b.currentHp + (b.card.damage || 25) * 2;
+          return scoreB - scoreA;
         });
+        chosenCoord = {
+          x: reachableEnemies[0].x,
+          y: reachableEnemies[0].y,
+        };
+      }
+    }
+    // 4. Habilidades de Cura / Buff (HEAL_BUFF)
+    else if (ability.effectType === "HEAL_BUFF") {
+      if (ability.targetType === "ALLY") {
+        const allies = updatedUnits.filter(
+          (au) =>
+            au.owner === "AI" &&
+            au.currentHp < au.maxHp &&
+            validTargets.some((t) => t.x === au.x && t.y === au.y)
+        );
+        if (allies.length > 0) {
+          allies.sort(
+            (a, b) => a.currentHp / a.maxHp - b.currentHp / b.maxHp
+          );
+          chosenCoord = { x: allies[0].x, y: allies[0].y };
+        }
+      } else if (unit.currentHp < unit.maxHp || playerUnitsNow.length > 0) {
+        chosenCoord = { x: unit.x, y: unit.y };
+      }
+    }
 
-        const bestMove = validMoves[0];
-        aiUnit.x = bestMove.x;
-        aiUnit.y = bestMove.y;
-        aiUnit.hasMoved = true;
-      } else {
-        // Heurística de COMBATE DIRETO: Avançar em direção ao Núcleo do Jogador (x=0)
-        validMoves.sort((a, b) => {
-          const distA = Math.hypot(a.x - playerCore.x, a.y - playerCore.y);
-          const distB = Math.hypot(b.x - playerCore.x, b.y - playerCore.y);
-          return distA - distB;
-        });
+    if (!chosenCoord) return false;
 
-        const bestMove = validMoves[0];
-        aiUnit.x = bestMove.x;
-        aiUnit.y = bestMove.y;
-        aiUnit.hasMoved = true;
+    const abResult = executeCreatureAbility(
+      unit,
+      ability,
+      chosenCoord.x,
+      chosenCoord.y,
+      grid,
+      updatedUnits
+    );
+    updatedUnits = abResult.updatedUnits;
+    floatingDamages.push(...abResult.floatingDamages);
+    abilityVfxList.push(abResult.vfx);
+    actionLogs.push(`[IA] ${abResult.summaryText}`);
+    return true;
+  };
+
+  // ========================================================
+  // FASE 4: HABILIDADES, MOVIMENTO E ATAQUE (ATÉ 2 AÇÕES POR CRIATURA)
+  // ========================================================
+  const consumeAiAction = (unit: BoardUnit) => {
+    const nextActions = Math.max(
+      0,
+      (unit.actionsRemaining ?? MAX_UNIT_ACTIONS_PER_TURN) - 1
+    );
+    unit.actionsRemaining = nextActions;
+    unit.hasMoved = nextActions <= 0;
+    unit.hasAttacked = nextActions <= 0;
+  };
+
+  const currentAiUnitIds = updatedUnits
+    .filter((u) => u.owner === "AI")
+    .map((u) => u.id);
+
+  for (const aiUnitId of currentAiUnitIds) {
+    // Cada criatura da IA pode executar até 2 ações no turno (Atacar, Movimentar ou Usar Habilidade, podendo repetir a mesma ação)
+    for (let actionStep = 0; actionStep < MAX_UNIT_ACTIONS_PER_TURN; actionStep++) {
+      let aiUnit = updatedUnits.find((u) => u.id === aiUnitId);
+      if (
+        !aiUnit ||
+        (aiUnit.actionsRemaining ?? MAX_UNIT_ACTIONS_PER_TURN) <= 0
+      ) {
+        break;
       }
 
-      // 2. TENTAR ATACAR APÓS O MOVIMENTO
-      const newAttackTargets = getValidAttackTiles(aiUnit, grid, updatedUnits);
-      const canHitCoreAfterMove = newAttackTargets.some(
+      // 1. Tenta usar Habilidade Única se estiver pronta e houver bom alvo (consome 1 ação dentro de executeCreatureAbility)
+      if (tryUseAiUnitAbility(aiUnitId)) {
+        continue;
+      }
+
+      aiUnit = updatedUnits.find((u) => u.id === aiUnitId);
+      if (
+        !aiUnit ||
+        (aiUnit.actionsRemaining ?? MAX_UNIT_ACTIONS_PER_TURN) <= 0
+      ) {
+        break;
+      }
+
+      // 2. CHECAGEM DE ATAQUE (se houver alvo ao alcance)
+      const attackTargets = getValidAttackTiles(aiUnit, grid, updatedUnits);
+
+      // Prioridade 1: Atacar Núcleo do Jogador se estiver no alcance
+      const canHitPlayerCore = attackTargets.some(
         (t) => t.x === playerCore.x && t.y === playerCore.y
       );
 
-      if (canHitCoreAfterMove) {
-        const damage = aiUnit.card.damage || 25;
+      if (canHitPlayerCore) {
+        const damage = getEffectiveUnitDamage(aiUnit);
         playerCore.currentHp = Math.max(playerCore.currentHp - damage, 0);
-        aiUnit.hasAttacked = true;
+        consumeAiAction(aiUnit);
 
         floatingDamages.push({
-          id: `ai_atk_core_post_${Date.now()}_${aiUnit.id}`,
+          id: `ai_atk_core_${Date.now()}_${aiUnit.id}_${actionStep}`,
           x: playerCore.x,
           y: playerCore.y,
           damage,
@@ -338,37 +400,160 @@ export function executeAiTurn(
         });
 
         actionLogs.push(
-          `[IA] "${aiUnit.card.name}" avançou e bombardeou o Núcleo Aliado por ${damage} de dano!`
+          `[IA] "${aiUnit.card.name}" atacou diretamente o Núcleo Aliado causando ${damage} de dano!`
         );
-      } else {
-        const enemiesInReach = updatedUnits.filter(
-          (u) =>
-            u.owner === "PLAYER" &&
-            newAttackTargets.some((t) => t.x === u.x && t.y === u.y)
+        continue;
+      }
+
+      // Prioridade 2: Eliminar uma criatura do jogador com dano letal
+      const playerUnitsInReach = updatedUnits.filter(
+        (u) =>
+          u.owner === "PLAYER" &&
+          attackTargets.some((t) => t.x === u.x && t.y === u.y)
+      );
+
+      const aiEffectiveDamage = getEffectiveUnitDamage(aiUnit);
+      const lethalTarget = playerUnitsInReach.find(
+        (u) => u.currentHp <= aiEffectiveDamage
+      );
+
+      if (lethalTarget) {
+        const shell = (lethalTarget.statusEffects || []).find(
+          (s) => s.type === "GOLDEN_SHELL" && s.turnsLeft > 0
         );
+        const damage = shell
+          ? Math.max(1, Math.round(aiEffectiveDamage * 0.7))
+          : aiEffectiveDamage;
+        const reflected = shell
+          ? Math.max(1, Math.round(aiEffectiveDamage * 0.5))
+          : 0;
 
-        if (enemiesInReach.length > 0) {
-          enemiesInReach.sort((a, b) => a.currentHp - b.currentHp);
-          const target = enemiesInReach[0];
-          const damage = aiUnit.card.damage || 25;
-          target.currentHp -= damage;
-          aiUnit.hasAttacked = true;
-
+        lethalTarget.currentHp -= damage;
+        if (reflected > 0) {
+          aiUnit.currentHp -= reflected;
           floatingDamages.push({
-            id: `ai_atk_enemy_post_${Date.now()}_${aiUnit.id}`,
-            x: target.x,
-            y: target.y,
-            damage,
-            isFatal: target.currentHp <= 0,
+            id: `ai_refl_${Date.now()}_${aiUnit.id}`,
+            x: aiUnit.x,
+            y: aiUnit.y,
+            damage: reflected,
+            label: `-${reflected} Refletido!`,
+            variant: "ABILITY",
+          });
+        }
+        consumeAiAction(aiUnit);
+
+        floatingDamages.push({
+          id: `ai_atk_lethal_${Date.now()}_${aiUnit.id}_${actionStep}`,
+          x: lethalTarget.x,
+          y: lethalTarget.y,
+          damage,
+          isFatal: lethalTarget.currentHp <= 0,
+        });
+
+        actionLogs.push(
+          `[IA] "${aiUnit.card.name}" atacou "${lethalTarget.card.name}" causando ${damage} de dano!`
+        );
+
+        updatedUnits = updatedUnits.filter((u) => u.currentHp > 0);
+        continue;
+      }
+
+      // Prioridade 3: Atacar inimigo no alcance com menor HP
+      if (playerUnitsInReach.length > 0) {
+        playerUnitsInReach.sort((a, b) => a.currentHp - b.currentHp);
+        const chosenTarget = playerUnitsInReach[0];
+        const shell = (chosenTarget.statusEffects || []).find(
+          (s) => s.type === "GOLDEN_SHELL" && s.turnsLeft > 0
+        );
+        const damage = shell
+          ? Math.max(1, Math.round(aiEffectiveDamage * 0.7))
+          : aiEffectiveDamage;
+        const reflected = shell
+          ? Math.max(1, Math.round(aiEffectiveDamage * 0.5))
+          : 0;
+
+        chosenTarget.currentHp -= damage;
+        if (reflected > 0) {
+          aiUnit.currentHp -= reflected;
+          floatingDamages.push({
+            id: `ai_refl_${Date.now()}_${aiUnit.id}`,
+            x: aiUnit.x,
+            y: aiUnit.y,
+            damage: reflected,
+            label: `-${reflected} Refletido!`,
+            variant: "ABILITY",
+          });
+        }
+        consumeAiAction(aiUnit);
+
+        floatingDamages.push({
+          id: `ai_atk_focus_${Date.now()}_${aiUnit.id}_${actionStep}`,
+          x: chosenTarget.x,
+          y: chosenTarget.y,
+          damage,
+          isFatal: chosenTarget.currentHp <= 0,
+        });
+
+        actionLogs.push(
+          `[IA] "${aiUnit.card.name}" focou "${chosenTarget.card.name}" causando ${damage} de dano.`
+        );
+
+        updatedUnits = updatedUnits.filter((u) => u.currentHp > 0);
+        continue;
+      }
+
+      // 3. SE NÃO HÁ ALVO DE ATAQUE NO ALCANCE: MOVIMENTAR-SE INTELIGENTEMENTE (consome 1 ação)
+      const validMoves = getValidMovementTiles(
+        aiUnit,
+        grid,
+        updatedUnits,
+        updatedCores
+      );
+
+      if (validMoves.length > 0) {
+        if (aiUnit.card.attackType === "ARREMESSO") {
+          validMoves.sort((a, b) => {
+            const aHasObstacle = [
+              { x: a.x + 1, y: a.y },
+              { x: a.x - 1, y: a.y },
+              { x: a.x, y: a.y + 1 },
+              { x: a.x, y: a.y - 1 },
+            ].some((pos) => grid[pos.y]?.[pos.x]?.type === "OBSTACLE");
+
+            const bHasObstacle = [
+              { x: b.x + 1, y: b.y },
+              { x: b.x - 1, y: b.y },
+              { x: b.x, y: b.y + 1 },
+              { x: b.x, y: b.y - 1 },
+            ].some((pos) => grid[pos.y]?.[pos.x]?.type === "OBSTACLE");
+
+            if (aHasObstacle && !bHasObstacle) return -1;
+            if (!aHasObstacle && bHasObstacle) return 1;
+
+            return a.x - b.x;
           });
 
-          actionLogs.push(
-            `[IA] "${aiUnit.card.name}" avançou e atacou "${target.card.name}" por ${damage} de dano!`
-          );
+          const bestMove = validMoves[0];
+          aiUnit.x = bestMove.x;
+          aiUnit.y = bestMove.y;
+          consumeAiAction(aiUnit);
+        } else {
+          validMoves.sort((a, b) => {
+            const distA = Math.hypot(a.x - playerCore.x, a.y - playerCore.y);
+            const distB = Math.hypot(b.x - playerCore.x, b.y - playerCore.y);
+            return distA - distB;
+          });
 
-          updatedUnits = updatedUnits.filter((u) => u.currentHp > 0);
+          const bestMove = validMoves[0];
+          aiUnit.x = bestMove.x;
+          aiUnit.y = bestMove.y;
+          consumeAiAction(aiUnit);
         }
+        continue;
       }
+
+      // Sem ações válidas possíveis (ex: bloqueado/enraizado e sem alvos)
+      break;
     }
   }
 
@@ -380,6 +565,7 @@ export function executeAiTurn(
     updatedCores,
     actionLogs,
     floatingDamages,
+    abilityVfxList,
   };
 }
 

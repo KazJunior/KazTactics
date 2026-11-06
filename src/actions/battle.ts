@@ -2,6 +2,7 @@
 
 import { db } from "@/db";
 import { users, campaignStages } from "@/db/schema";
+import { getEffectiveUser } from "@/lib/auth";
 import { eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
@@ -11,16 +12,20 @@ export interface StageClearResult {
   newGold?: number;
   newStage?: number;
   rewardEarned?: number;
+  supremePackGranted?: boolean;
 }
 
 /**
- * Concede a recompensa em ouro da fase vencida e avança o estágio do jogador no NeonDB
+ * Concede a recompensa em ouro da fase vencida (+1 Pacote Supremo especial) e avança o estágio do jogador no NeonDB
  */
 export async function claimStageVictoryAction(
   stageNumber: number
 ): Promise<StageClearResult> {
   try {
-    const [user] = await db.select().from(users).limit(1);
+    await db.execute(
+      sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "supreme_packs" integer DEFAULT 1 NOT NULL;`
+    );
+    const user = await getEffectiveUser();
     if (!user) {
       return { success: false, error: "Jogador não encontrado." };
     }
@@ -39,6 +44,7 @@ export async function claimStageVictoryAction(
       .update(users)
       .set({
         gold: sql`${users.gold} + ${goldReward}`,
+        supremePacks: sql`${users.supremePacks} + 1`,
         currentStage: nextStage,
       })
       .where(eq(users.id, user.id))
@@ -57,6 +63,7 @@ export async function claimStageVictoryAction(
       newGold: updatedUser.gold,
       newStage: updatedUser.currentStage,
       rewardEarned: goldReward,
+      supremePackGranted: true,
     };
   } catch (error) {
     console.error("Erro ao creditar recompensa da fase:", error);

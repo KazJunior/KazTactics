@@ -130,8 +130,11 @@ export function GameOverModal({
                 <span className="text-[10px] font-gothic font-bold uppercase tracking-wider text-[#9E8C70] block">
                   Saque Pilhado das Catacumbas
                 </span>
-                <span className="text-2xl font-numbers font-black text-[#F29F3D]">
+                <span className="text-2xl font-numbers font-black text-[#F29F3D] block">
                   +{goldReward} Ouro Antigo
+                </span>
+                <span className="text-[11px] font-gothic font-bold text-[#E9D5FF] block mt-0.5">
+                  👑 +1 Pacote Supremo Especial Concedido!
                 </span>
               </div>
             </div>

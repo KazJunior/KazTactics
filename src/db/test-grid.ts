@@ -16,8 +16,8 @@ async function testGridTactics() {
   const grid = createDefaultGrid();
   console.log(`📐 Grid inicializado: ${grid[0].length} colunas x ${grid.length} linhas.`);
 
-  if (grid.length !== 7 || grid[0].length !== 11) {
-    throw new Error(`Dimensões incorretas! Esperado 11x7, obtido ${grid[0].length}x${grid.length}`);
+  if (grid.length !== BOARD_HEIGHT || grid[0].length !== BOARD_WIDTH) {
+    throw new Error(`Dimensões incorretas! Esperado ${BOARD_WIDTH}x${BOARD_HEIGHT}, obtido ${grid[0].length}x${grid.length}`);
   }
 
   // 2. Mock de Cartas (Line of Sight vs Arremesso)

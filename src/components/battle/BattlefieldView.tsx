@@ -1,7 +1,20 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { GridTile, BoardUnit, BoardCore } from "@/types/game";
+import {
+  GridTile,
+  BoardUnit,
+  BoardCore,
+  BiomeType,
+  MAX_UNIT_ACTIONS_PER_TURN,
+} from "@/types/game";
+import {
+  BIOME_ORDER,
+  BIOME_CONFIGS,
+  getBiomeForStage,
+  getNextBiome,
+} from "@/lib/tactics/biomes";
+import { BiomeAtmosphereBackdrop } from "./BiomeAtmosphereBackdrop";
 import {
   createDefaultGrid,
   getValidMovementTiles,
@@ -18,10 +31,26 @@ import {
 } from "@/lib/tactics/gameState";
 import { checkGameEndCondition, GameOverState } from "@/lib/tactics/endGame";
 import { executeAiTurn } from "@/lib/tactics/aiEngine";
-import { FloatingDamage } from "@/lib/tactics/combat";
+import { FloatingDamage, getEffectiveUnitDamage } from "@/lib/tactics/combat";
+import {
+  getCreatureAbility,
+  getValidAbilityTargetTiles,
+  getAbilityImpactZoneTiles,
+  executeCreatureAbility,
+  processTurnStartAbilitiesAndStatuses,
+  AbilityVfxData,
+} from "@/lib/abilities";
 import { TacticalGrid } from "./TacticalGrid";
-import { ManaBar } from "./ManaBar";
 import { HandCards } from "./HandCards";
+import { AbyssalManaDiamond } from "@/components/cards/CardComponent";
+import { CutoutMonsterSprite } from "./CutoutMonsterSprite";
+import {
+  ProfileAvatarModal,
+  AVATAR_STORAGE_KEY,
+  AVATAR_CHANGE_EVENT,
+  SelectedAvatarInfo,
+} from "@/components/ProfileAvatarModal";
+import { getPlayerAvatarDataAction } from "@/actions/profile";
 import { GameOverModal } from "./GameOverModal";
 import { ActionFreezeFrameData } from "./ActionFreezeFrameOverlay";
 import { IronCrownSpellBanner } from "./IronCrownSpellBanner";
@@ -53,6 +82,7 @@ interface BattlefieldViewProps {
   stageNumber?: number;
   initialAiHp?: number;
   goldReward?: number;
+  initialAvatarName?: string;
 }
 
 export function BattlefieldView({
@@ -61,55 +91,175 @@ export function BattlefieldView({
   stageNumber = 1,
   initialAiHp = 300,
   goldReward = 100,
+  initialAvatarName,
 }: BattlefieldViewProps) {
-  // 1. Grid
-  const [grid] = useState<GridTile[][]>(() => createDefaultGrid());
+  // 0. Foto de Perfil do Jogador (Criatura Desbloqueada) e do Enemy
+  const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
+  const [playerAvatar, setPlayerAvatar] = useState<SelectedAvatarInfo>(() => {
+    const matched = sampleCards.find(
+      (c) => c.name === (initialAvatarName || "Lobo Cinzento Caçador")
+    );
+    return {
+      name: initialAvatarName || "Lobo Cinzento Caçador",
+      type: matched?.type || "BESTIAIS",
+    };
+  });
 
-  // 2. Núcleos
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(AVATAR_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.name) {
+          setPlayerAvatar({
+            name: parsed.name,
+            type: parsed.type || "BESTIAIS",
+          });
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    getPlayerAvatarDataAction()
+      .then((data) => {
+        if (data?.avatarCardName) {
+          const synced = {
+            name: data.avatarCardName,
+            type: data.avatarCardType || "BESTIAIS",
+          };
+          setPlayerAvatar(synced);
+          try {
+            localStorage.setItem(AVATAR_STORAGE_KEY, JSON.stringify(synced));
+          } catch {
+            // ignore
+          }
+        }
+      })
+      .catch(() => {});
+
+    const handleAvatarEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<SelectedAvatarInfo>;
+      if (customEvent.detail?.name) {
+        setPlayerAvatar(customEvent.detail);
+      }
+    };
+
+    window.addEventListener(AVATAR_CHANGE_EVENT, handleAvatarEvent);
+    return () => {
+      window.removeEventListener(AVATAR_CHANGE_EVENT, handleAvatarEvent);
+    };
+  }, []);
+
+  // Criatura comandante do Enemy conforme a fase
+  const enemyAvatar = useMemo(() => {
+    if (stageNumber === 2) {
+      return { name: "Arqueiro Esqueleto Maldito", type: "MORTOS_VIVOS" };
+    }
+    if (stageNumber === 3) {
+      return { name: "Colosso de Latão e Vapor", type: "MECANICOS" };
+    }
+    if (stageNumber === 4) {
+      return { name: "Necromante do Sepulcro", type: "MORTOS_VIVOS" };
+    }
+    if (stageNumber >= 5) {
+      return { name: "Dragão Ancestral de Platina", type: "MITOLOGICOS" };
+    }
+    return { name: "Grifo dos Picos Nevados", type: "MITOLOGICOS" };
+  }, [stageNumber]);
+  // 1. Grid 15x9 Expandido, Controle de Zoom e Sistema de Biomas de Fantasia 2D
+  const [grid] = useState<GridTile[][]>(() => createDefaultGrid());
+  const [boardZoom, setBoardZoom] = useState<number>(1.05);
+  const [currentBiome, setCurrentBiome] = useState<BiomeType>(() =>
+    getBiomeForStage(stageNumber)
+  );
+
+  useEffect(() => {
+    setCurrentBiome(getBiomeForStage(stageNumber));
+  }, [stageNumber]);
+
+  // 2. Núcleos (Posicionamento nas extremidades do tabuleiro 15x9: (0,4) e (14,4))
   const [cores, setCores] = useState<BoardCore[]>([
     {
       owner: "PLAYER",
       name: "Núcleo Aliado",
       x: 0,
-      y: 3,
+      y: 4,
       currentHp: 1000,
       maxHp: 1000,
     },
     {
       owner: "AI",
       name: "Núcleo da IA",
-      x: 10,
-      y: 3,
+      x: 14,
+      y: 4,
       currentHp: initialAiHp,
       maxHp: initialAiHp,
     },
   ]);
 
-  // Função para criar o exército inicial
+  // Função para criar o exército inicial no tabuleiro expandido 15x9
   const generateInitialUnits = (): BoardUnit[] => {
     const list: BoardUnit[] = [];
 
-    const archer = sampleCards.find(
-      (c) => c.name === "Arqueiro Esqueleto Maldito"
-    ) || sampleCards[0];
+    const wolf =
+      sampleCards.find((c) => c.name === "Lobo Cinzento Caçador") ||
+      sampleCards[0];
 
-    const catapult = sampleCards.find(
-      (c) => c.name === "Catapulta a Vapor Blindada"
-    ) || sampleCards[1];
+    const reaper =
+      sampleCards.find((c) => c.name === "Banshee Lamuriante") ||
+      sampleCards.find((c) => c.name === "Necromante do Sepulcro") ||
+      sampleCards[1];
 
-    const wolf = sampleCards.find(
-      (c) => c.name === "Lobo Cinzento Caçador"
-    ) || sampleCards[2];
+    const catapult =
+      sampleCards.find((c) => c.name === "Catapulta a Vapor Blindada") ||
+      sampleCards.find((c) => c.name === "Colosso de Latão e Vapor") ||
+      sampleCards[2];
 
-    if (archer) {
+    const wisp =
+      sampleCards.find((c) => c.name === "Fogo-Fátuo Ilusório") ||
+      sampleCards[3];
+
+    const gargoyle =
+      sampleCards.find((c) => c.name === "Grifo dos Picos Nevados") ||
+      sampleCards.find((c) => c.name === "Minotauro do Labirinto") ||
+      sampleCards[4] ||
+      wolf;
+
+    const archer =
+      sampleCards.find((c) => c.name === "Arqueiro Esqueleto Maldito") ||
+      sampleCards[0];
+
+    const magmaGolem =
+      sampleCards.find((c) => c.name === "Urso da Tundra Enraivecido") ||
+      sampleCards.find((c) => c.name === "Escaravelho Batedor") ||
+      sampleCards[1] ||
+      catapult;
+
+    // 4 Unidades Aliadas à Esquerda
+    if (wolf) {
       list.push({
-        id: "player_archer",
-        card: archer,
+        id: "player_wolf",
+        card: wolf,
+        owner: "PLAYER",
+        x: 1,
+        y: 2,
+        currentHp: wolf.hp || 80,
+        maxHp: wolf.hp || 80,
+        hasMoved: false,
+        hasAttacked: false,
+      });
+    }
+
+    if (reaper) {
+      list.push({
+        id: "player_reaper",
+        card: reaper,
         owner: "PLAYER",
         x: 2,
-        y: 2,
-        currentHp: archer.hp || 70,
-        maxHp: archer.hp || 70,
+        y: 4,
+        currentHp: reaper.hp || 85,
+        maxHp: reaper.hp || 85,
         hasMoved: false,
         hasAttacked: false,
       });
@@ -121,7 +271,7 @@ export function BattlefieldView({
         card: catapult,
         owner: "PLAYER",
         x: 1,
-        y: 1,
+        y: 6,
         currentHp: catapult.hp || 140,
         maxHp: catapult.hp || 140,
         hasMoved: false,
@@ -129,21 +279,70 @@ export function BattlefieldView({
       });
     }
 
-    if (wolf) {
+    if (wisp) {
       list.push({
-        id: "ai_wolf",
-        card: wolf,
-        owner: "AI",
-        x: 7,
-        y: 3,
-        currentHp: wolf.hp || 80,
-        maxHp: wolf.hp || 80,
+        id: "player_wisp",
+        card: wisp,
+        owner: "PLAYER",
+        x: 3,
+        y: 5,
+        currentHp: wisp.hp || 45,
+        maxHp: wisp.hp || 45,
         hasMoved: false,
         hasAttacked: false,
       });
     }
 
-    return list;
+    // 3 Unidades Inimigas à Direita no Tabuleiro 15x9
+    if (gargoyle) {
+      list.push({
+        id: "ai_gargoyle",
+        card: gargoyle,
+        owner: "AI",
+        x: 10,
+        y: 2,
+        currentHp: gargoyle.hp || 110,
+        maxHp: gargoyle.hp || 110,
+        hasMoved: false,
+        hasAttacked: false,
+      });
+    }
+
+    if (archer) {
+      list.push({
+        id: "ai_archer",
+        card: archer,
+        owner: "AI",
+        x: 11,
+        y: 3,
+        currentHp: archer.hp || 65,
+        maxHp: archer.hp || 65,
+        hasMoved: false,
+        hasAttacked: false,
+      });
+    }
+
+    if (magmaGolem) {
+      list.push({
+        id: "ai_magma",
+        card: magmaGolem,
+        owner: "AI",
+        x: 12,
+        y: 5,
+        currentHp: magmaGolem.hp || 140,
+        maxHp: magmaGolem.hp || 140,
+        hasMoved: false,
+        hasAttacked: false,
+      });
+    }
+
+    return list.map((u) => ({
+      ...u,
+      actionsRemaining: MAX_UNIT_ACTIONS_PER_TURN,
+      abilityCooldown: 0,
+      usedAbilityThisTurn: false,
+      statusEffects: [],
+    }));
   };
 
   // 3. Unidades em Campo
@@ -154,13 +353,26 @@ export function BattlefieldView({
   const [turnNumber, setTurnNumber] = useState<number>(1);
   const [isAiTurn, setIsAiTurn] = useState<boolean>(false);
 
-  // 5. Baralho e Mão do Jogador
+  // 5. Baralho e Mão do Jogador (Garante as 4 cartas icônicas da imagem na mão inicial)
   const [deck, setDeck] = useState<Card[]>(() => {
+    const c1 = sampleCards.find((c) => c.name === "Lobo Cinzento Caçador");
+    const c2 =
+      sampleCards.find((c) => c.name === "Banshee Lamuriante") ||
+      sampleCards.find((c) => c.name === "Necromante do Sepulcro");
+    const c3 =
+      sampleCards.find((c) => c.name === "Recruta com Escudo Torre") ||
+      sampleCards.find((c) => c.name === "Catapulta a Vapor Blindada");
+    const c4 = sampleCards.find((c) => c.name === "Fogo-Fátuo Ilusório");
+
+    const showcaseHand = [c1, c2, c3, c4].filter((c): c is Card => Boolean(c));
     const fullDeck: Card[] = [];
-    while (fullDeck.length < 30 && sampleCards.length > 0) {
-      fullDeck.push(...sampleCards.slice(0, 30 - fullDeck.length));
+    while (fullDeck.length < 26 && sampleCards.length > 0) {
+      fullDeck.push(...sampleCards.slice(0, 26 - fullDeck.length));
     }
-    return shuffleDeck(fullDeck.length > 0 ? fullDeck : sampleCards);
+    return [
+      ...showcaseHand,
+      ...shuffleDeck(fullDeck.length > 0 ? fullDeck : sampleCards),
+    ];
   });
 
   const [hand, setHand] = useState<Card[]>(() => deck.slice(0, 4));
@@ -182,9 +394,10 @@ export function BattlefieldView({
     aiDeck.slice(4)
   );
 
-  // 7. Seleções
+  // 7. Seleções e Modo de Mira de Habilidade Ativa Única
   const [selectedHandCard, setSelectedHandCard] = useState<Card | null>(null);
   const [selectedUnit, setSelectedUnit] = useState<BoardUnit | null>(null);
+  const [isAimingAbility, setIsAimingAbility] = useState<boolean>(false);
   const [hoveredUnit, setHoveredUnit] = useState<BoardUnit | null>(null);
   const [hoveredTile, setHoveredTile] = useState<{ x: number; y: number } | null>(
     null
@@ -192,6 +405,8 @@ export function BattlefieldView({
 
   // 8. Floating Damages & Darkest Dungeon Action FX
   const [floatingDamages, setFloatingDamages] = useState<FloatingDamage[]>([]);
+  const [activeAbilityVfx, setActiveAbilityVfx] =
+    useState<AbilityVfxData | null>(null);
   const [hitUnitId, setHitUnitId] = useState<string | null>(null);
   const [dyingUnitId, setDyingUnitId] = useState<string | null>(null);
   const [actionFreezeData, setActionFreezeData] =
@@ -299,13 +514,25 @@ export function BattlefieldView({
     x: number,
     y: number,
     damage: number,
-    isFatal = false
+    isFatal = false,
+    label?: string,
+    variant?: "DAMAGE" | "POISON" | "HEAL" | "ABILITY"
   ) => {
     const id = `dmg_${Date.now()}_${Math.random()}`;
-    setFloatingDamages((prev) => [...prev, { id, x, y, damage, isFatal }]);
+    setFloatingDamages((prev) => [
+      ...prev,
+      { id, x, y, damage, isFatal, label, variant },
+    ]);
     setTimeout(() => {
       setFloatingDamages((prev) => prev.filter((d) => d.id !== id));
-    }, 1200);
+    }, 1350);
+  };
+
+  const triggerAbilityVfx = (vfx: AbilityVfxData) => {
+    setActiveAbilityVfx(vfx);
+    setTimeout(() => {
+      setActiveAbilityVfx((prev) => (prev?.id === vfx.id ? null : prev));
+    }, 950);
   };
 
   // Casas de Spawn válidas para monstro
@@ -337,20 +564,127 @@ export function BattlefieldView({
     return getValidSpellTargets(selectedHandCard, grid, units, cores);
   }, [selectedHandCard, grid, units, cores]);
 
-  // Casas de Movimento e Ataque da unidade ativa
+  // Habilidade ativa única da unidade selecionada
+  const selectedUnitAbility = useMemo(() => {
+    if (!selectedUnit) return null;
+    return getCreatureAbility(selectedUnit.card.name, selectedUnit.card.type);
+  }, [selectedUnit]);
+
+  const abilityTiles = useMemo(() => {
+    if (
+      !isAimingAbility ||
+      !selectedUnit ||
+      selectedUnit.owner !== "PLAYER" ||
+      (selectedUnit.actionsRemaining ?? MAX_UNIT_ACTIONS_PER_TURN) <= 0 ||
+      !selectedUnitAbility ||
+      isAiTurn
+    ) {
+      return [];
+    }
+    return getValidAbilityTargetTiles(
+      selectedUnit,
+      selectedUnitAbility,
+      grid,
+      units
+    );
+  }, [isAimingAbility, selectedUnit, selectedUnitAbility, grid, units, isAiTurn]);
+
+  // Zona de impacto 3x3 em laranja/vermelho ao passar o mouse sobre um alvo de habilidade em área
+  const aoePreviewTiles = useMemo(() => {
+    if (
+      !isAimingAbility ||
+      !selectedUnit ||
+      !selectedUnitAbility ||
+      isAiTurn
+    ) {
+      return [];
+    }
+    const isAreaSkill =
+      selectedUnitAbility.effectType === "AOE_DAMAGE" ||
+      selectedUnitAbility.targetType === "SELF_AOE" ||
+      selectedUnitAbility.targetType === "AREA_TARGET" ||
+      (selectedUnitAbility.aoeRadius ?? 0) >= 1;
+
+    if (!isAreaSkill) return [];
+
+    if (selectedUnitAbility.targetType === "SELF_AOE") {
+      return getAbilityImpactZoneTiles(
+        selectedUnit,
+        selectedUnitAbility,
+        selectedUnit.x,
+        selectedUnit.y,
+        grid
+      );
+    }
+
+    if (!hoveredTile) return [];
+    const isHoverValid = abilityTiles.some(
+      (t) => t.x === hoveredTile.x && t.y === hoveredTile.y
+    );
+    if (!isHoverValid) return [];
+
+    return getAbilityImpactZoneTiles(
+      selectedUnit,
+      selectedUnitAbility,
+      hoveredTile.x,
+      hoveredTile.y,
+      grid
+    );
+  }, [
+    isAimingAbility,
+    selectedUnit,
+    selectedUnitAbility,
+    hoveredTile,
+    abilityTiles,
+    grid,
+    isAiTurn,
+  ]);
+
+  // Casas de Movimento e Ataque da unidade ativa (permite 2 ações por turno, podendo repetir a mesma ação)
   const movementTiles = useMemo(() => {
+    if (isAimingAbility) return [];
     if (selectedHandCard) return spawnTiles;
-    if (!activeUnit || activeUnit.hasMoved || isAiTurn) return [];
+    if (
+      !activeUnit ||
+      (activeUnit.actionsRemaining ?? MAX_UNIT_ACTIONS_PER_TURN) <= 0 ||
+      isAiTurn
+    ) {
+      return [];
+    }
     return getValidMovementTiles(activeUnit, grid, units, cores);
-  }, [selectedHandCard, spawnTiles, activeUnit, grid, units, cores, isAiTurn]);
+  }, [
+    isAimingAbility,
+    selectedHandCard,
+    spawnTiles,
+    activeUnit,
+    grid,
+    units,
+    cores,
+    isAiTurn,
+  ]);
 
   const attackTiles = useMemo(() => {
+    if (isAimingAbility) return [];
     if (selectedHandCard && selectedHandCard.category === "FEITICO") {
       return spellTargetTiles;
     }
-    if (!activeUnit || activeUnit.hasAttacked || isAiTurn) return [];
+    if (
+      !activeUnit ||
+      (activeUnit.actionsRemaining ?? MAX_UNIT_ACTIONS_PER_TURN) <= 0 ||
+      isAiTurn
+    ) {
+      return [];
+    }
     return getValidAttackTiles(activeUnit, grid, units);
-  }, [selectedHandCard, spellTargetTiles, activeUnit, grid, units, isAiTurn]);
+  }, [
+    isAimingAbility,
+    selectedHandCard,
+    spellTargetTiles,
+    activeUnit,
+    grid,
+    units,
+    isAiTurn,
+  ]);
 
   // ==========================================================
   // REINICIAR PARTIDA
@@ -361,15 +695,15 @@ export function BattlefieldView({
         owner: "PLAYER",
         name: "Núcleo Aliado",
         x: 0,
-        y: 3,
+        y: 4,
         currentHp: 1000,
         maxHp: 1000,
       },
       {
         owner: "AI",
         name: "Núcleo da IA",
-        x: 10,
-        y: 3,
+        x: 14,
+        y: 4,
         currentHp: initialAiHp,
         maxHp: initialAiHp,
       },
@@ -390,11 +724,14 @@ export function BattlefieldView({
     setHand(shuffled.slice(0, 4));
     setRemainingDeck(shuffled.slice(4));
 
+    const nextBiome = getNextBiome(currentBiome);
+    setCurrentBiome(nextBiome);
     setSelectedHandCard(null);
     setSelectedUnit(null);
+    setIsAimingAbility(false);
     setGameOverState({ isGameOver: false });
     setBattleMessage({
-      text: "Partida reiniciada com sucesso! Conquiste o campo de batalha.",
+      text: `Nova partida iniciada no bioma ${BIOME_CONFIGS[nextBiome].emoji} ${BIOME_CONFIGS[nextBiome].name}!`,
       type: "info",
     });
   };
@@ -407,6 +744,7 @@ export function BattlefieldView({
 
     setSelectedHandCard(null);
     setSelectedUnit(null);
+    setIsAimingAbility(false);
     setIsAiTurn(true);
 
     setBattleMessage({
@@ -433,9 +771,20 @@ export function BattlefieldView({
       setUnits(aiResult.updatedUnits);
       setCores(aiResult.updatedCores);
 
-      // Disparar danos flutuantes e Action Freeze da IA
+      // Disparar VFX de Habilidades usadas pela IA e danos flutuantes
+      if (aiResult.abilityVfxList.length > 0) {
+        triggerAbilityVfx(aiResult.abilityVfxList[0]);
+      }
+
       for (const fd of aiResult.floatingDamages) {
-        triggerFloatingDamage(fd.x, fd.y, fd.damage, fd.isFatal);
+        triggerFloatingDamage(
+          fd.x,
+          fd.y,
+          fd.damage,
+          fd.isFatal,
+          fd.label,
+          fd.variant
+        );
       }
 
       if (aiResult.floatingDamages.length > 0) {
@@ -460,16 +809,28 @@ export function BattlefieldView({
       }
 
       // --------------------------------------------------------
-      // RETORNO PARA O TURNO DO JOGADOR
+      // RETORNO PARA O TURNO DO JOGADOR (RECARGA DE HABILIDADES + VENENO)
       // --------------------------------------------------------
       const nextPlayerMana = calculateTurnMana(currentMana);
       setCurrentMana(nextPlayerMana);
       setTurnNumber((prev) => prev + 1);
 
-      // Reseta ações das tropas do jogador
-      setUnits((prev) =>
-        prev.map((u) => ({ ...u, hasMoved: false, hasAttacked: false }))
+      const playerTurnStart = processTurnStartAbilitiesAndStatuses(
+        "PLAYER",
+        aiResult.updatedUnits
       );
+      setUnits(playerTurnStart.updatedUnits);
+
+      for (const pfd of playerTurnStart.poisonDamages) {
+        triggerFloatingDamage(
+          pfd.x,
+          pfd.y,
+          pfd.damage,
+          pfd.isFatal,
+          pfd.label,
+          pfd.variant
+        );
+      }
 
       // Compra de carta do jogador
       if (remainingDeck.length > 0 && hand.length < 7) {
@@ -549,8 +910,70 @@ export function BattlefieldView({
     }
   };
 
+  // Disparo direto ou por alvo da Habilidade Ativa Única
+  const executeSelectedUnitAbilityAt = (targetX: number, targetY: number) => {
+    if (!selectedUnit || !selectedUnitAbility) return;
+
+    const result = executeCreatureAbility(
+      selectedUnit,
+      selectedUnitAbility,
+      targetX,
+      targetY,
+      grid,
+      units
+    );
+
+    setIronCrownSpellName(selectedUnitAbility.name);
+    triggerAbilityVfx(result.vfx);
+    setIsScreenShaking(true);
+    setTimeout(() => setIsScreenShaking(false), 450);
+
+    for (const fd of result.floatingDamages) {
+      triggerFloatingDamage(
+        fd.x,
+        fd.y,
+        fd.damage,
+        fd.isFatal,
+        fd.label,
+        fd.variant
+      );
+    }
+
+    setUnits(result.updatedUnits);
+    setIsAimingAbility(false);
+    const updatedSelf =
+      result.updatedUnits.find((u) => u.id === selectedUnit.id) || null;
+    const remainingActions = updatedSelf?.actionsRemaining ?? 0;
+    setSelectedUnit(remainingActions > 0 ? updatedSelf : null);
+    setBattleMessage({
+      text: `${result.summaryText} (${remainingActions}/${MAX_UNIT_ACTIONS_PER_TURN} ação restante)`,
+      type: "success",
+    });
+  };
+
   const handleTileClick = (x: number, y: number) => {
     if (isAiTurn) return;
+
+    // 0) DISPARO DE HABILIDADE ATIVA ÚNICA EM MODO DE MIRA
+    if (
+      isAimingAbility &&
+      selectedUnit &&
+      selectedUnit.owner === "PLAYER" &&
+      selectedUnitAbility
+    ) {
+      const isValidAbilityTile = abilityTiles.some(
+        (t) => t.x === x && t.y === y
+      );
+      if (!isValidAbilityTile) {
+        setBattleMessage({
+          text: `Alvo inválido para "${selectedUnitAbility.name}"! Clique em uma casa destacada em roxo ou cancele a mira.`,
+          type: "warn",
+        });
+        return;
+      }
+      executeSelectedUnitAbilityAt(x, y);
+      return;
+    }
 
     // A) INVOCAR MONSTRO
     if (selectedHandCard && selectedHandCard.category === "MONSTRO") {
@@ -573,6 +996,10 @@ export function BattlefieldView({
         maxHp: selectedHandCard.hp || 100,
         hasMoved: false,
         hasAttacked: false,
+        actionsRemaining: MAX_UNIT_ACTIONS_PER_TURN,
+        abilityCooldown: 0,
+        usedAbilityThisTurn: false,
+        statusEffects: [],
       };
 
       setUnits((prev) => [...prev, newUnit]);
@@ -718,7 +1145,12 @@ export function BattlefieldView({
       const isAttackTile = attackTiles.some((t) => t.x === x && t.y === y);
 
       if (isAttackTile && (targetUnit?.owner === "AI" || targetCore?.owner === "AI")) {
-        const damage = selectedUnit.card.damage || 30;
+        const damage = getEffectiveUnitDamage(selectedUnit);
+        const nextActions = Math.max(
+          0,
+          (selectedUnit.actionsRemaining ?? MAX_UNIT_ACTIONS_PER_TURN) - 1
+        );
+        const actionsExhausted = nextActions <= 0;
 
         // Disparo do Action Freeze-Frame Darkest Dungeon
         setActionFreezeData({
@@ -731,8 +1163,30 @@ export function BattlefieldView({
         });
 
         if (targetUnit) {
-          const isFatal = targetUnit.currentHp <= damage;
-          triggerFloatingDamage(x, y, damage, isFatal);
+          const goldenShell = (targetUnit.statusEffects || []).find(
+            (s) => s.type === "GOLDEN_SHELL" && s.turnsLeft > 0
+          );
+          let finalDamage = damage;
+          let reflectedDmg = 0;
+          if (goldenShell) {
+            finalDamage = Math.max(1, Math.round(damage * 0.7)); // 30% redução
+            reflectedDmg = Math.max(1, Math.round(damage * 0.5)); // 50% refletido
+          }
+
+          const isFatal = targetUnit.currentHp <= finalDamage;
+          triggerFloatingDamage(x, y, finalDamage, isFatal);
+
+          if (reflectedDmg > 0) {
+            const attackerFatal = selectedUnit.currentHp <= reflectedDmg;
+            triggerFloatingDamage(
+              selectedUnit.x,
+              selectedUnit.y,
+              reflectedDmg,
+              attackerFatal,
+              `-${reflectedDmg} Refletido!`,
+              "ABILITY"
+            );
+          }
 
           // Hit-Stop e Respingos de Sangue
           setHitUnitId(targetUnit.id);
@@ -753,7 +1207,13 @@ export function BattlefieldView({
                   return { ...u, currentHp: 0 };
                 }
                 if (u.id === selectedUnit.id) {
-                  return { ...u, hasAttacked: true };
+                  return {
+                    ...u,
+                    currentHp: Math.max(0, u.currentHp - reflectedDmg),
+                    actionsRemaining: nextActions,
+                    hasMoved: actionsExhausted,
+                    hasAttacked: actionsExhausted,
+                  };
                 }
                 return u;
               })
@@ -761,27 +1221,39 @@ export function BattlefieldView({
 
             // Dissolução em Cinzas e Liberação do Slot de Criaturas
             setTimeout(() => {
-              setUnits((prev) => prev.filter((u) => u.id !== targetUnit.id));
+              setUnits((prev) =>
+                prev.filter(
+                  (u) => u.id !== targetUnit.id && u.currentHp > 0
+                )
+              );
               setDyingUnitId(null);
             }, 550);
           } else {
             setUnits((prev) =>
-              prev.map((u) => {
-                if (u.id === targetUnit.id) {
-                  return { ...u, currentHp: u.currentHp - damage };
-                }
-                if (u.id === selectedUnit.id) {
-                  return { ...u, hasAttacked: true };
-                }
-                return u;
-              })
+              prev
+                .map((u) => {
+                  if (u.id === targetUnit.id) {
+                    return { ...u, currentHp: u.currentHp - finalDamage };
+                  }
+                  if (u.id === selectedUnit.id) {
+                    return {
+                      ...u,
+                      currentHp: Math.max(0, u.currentHp - reflectedDmg),
+                      actionsRemaining: nextActions,
+                      hasMoved: actionsExhausted,
+                      hasAttacked: actionsExhausted,
+                    };
+                  }
+                  return u;
+                })
+                .filter((u) => u.currentHp > 0)
             );
           }
 
           setBattleMessage({
             text: isFatal
-              ? `💀 "${selectedUnit.card.name}" eliminou "${targetUnit.card.name}" causando ${damage} de dano fatal!`
-              : `🎯 "${selectedUnit.card.name}" atacou "${targetUnit.card.name}" causando ${damage} de dano!`,
+              ? `💀 "${selectedUnit.card.name}" eliminou "${targetUnit.card.name}" (${finalDamage} dano)! Ações restantes: ${nextActions}/${MAX_UNIT_ACTIONS_PER_TURN}.`
+              : `🎯 "${selectedUnit.card.name}" atacou "${targetUnit.card.name}" (${finalDamage} dano)! Ações restantes: ${nextActions}/${MAX_UNIT_ACTIONS_PER_TURN}.`,
             type: "success",
           });
         } else if (targetCore) {
@@ -798,16 +1270,34 @@ export function BattlefieldView({
           );
 
           setUnits((prev) =>
-            prev.map((u) => (u.id === selectedUnit.id ? { ...u, hasAttacked: true } : u))
+            prev.map((u) =>
+              u.id === selectedUnit.id
+                ? {
+                    ...u,
+                    actionsRemaining: nextActions,
+                    hasMoved: actionsExhausted,
+                    hasAttacked: actionsExhausted,
+                  }
+                : u
+            )
           );
 
           setBattleMessage({
-            text: `💥 "${selectedUnit.card.name}" bombardeou o Núcleo da IA causando ${damage} de dano direto!`,
+            text: `💥 "${selectedUnit.card.name}" bombardeou o Núcleo da IA (${damage} dano)! Ações restantes: ${nextActions}/${MAX_UNIT_ACTIONS_PER_TURN}.`,
             type: "success",
           });
         }
 
-        setSelectedUnit(null);
+        setSelectedUnit(
+          actionsExhausted
+            ? null
+            : {
+                ...selectedUnit,
+                actionsRemaining: nextActions,
+                hasMoved: actionsExhausted,
+                hasAttacked: actionsExhausted,
+              }
+        );
         return;
       }
 
@@ -846,24 +1336,52 @@ export function BattlefieldView({
 
       const isMoveValid = movementTiles.some((t) => t.x === x && t.y === y);
       if (isMoveValid) {
+        const nextActions = Math.max(
+          0,
+          (selectedUnit.actionsRemaining ?? MAX_UNIT_ACTIONS_PER_TURN) - 1
+        );
+        const actionsExhausted = nextActions <= 0;
+
         setUnits((prev) =>
           prev.map((u) =>
-            u.id === selectedUnit.id ? { ...u, x, y, hasMoved: true } : u
+            u.id === selectedUnit.id
+              ? {
+                  ...u,
+                  x,
+                  y,
+                  actionsRemaining: nextActions,
+                  hasMoved: actionsExhausted,
+                  hasAttacked: actionsExhausted,
+                }
+              : u
           )
         );
-        setSelectedUnit(null);
+        setSelectedUnit(
+          actionsExhausted
+            ? null
+            : {
+                ...selectedUnit,
+                x,
+                y,
+                actionsRemaining: nextActions,
+                hasMoved: actionsExhausted,
+                hasAttacked: actionsExhausted,
+              }
+        );
         setBattleMessage({
-          text: `👟 "${selectedUnit.card.name}" moveu-se para (${x}, ${y}).`,
+          text: `👟 "${selectedUnit.card.name}" moveu-se para (${x}, ${y}). Ações restantes: ${nextActions}/${MAX_UNIT_ACTIONS_PER_TURN}.`,
           type: "info",
         });
         return;
       }
 
       if (targetUnit && targetUnit.owner === "PLAYER") {
+        setIsAimingAbility(false);
         setSelectedUnit(targetUnit);
         return;
       }
 
+      setIsAimingAbility(false);
       setSelectedUnit(null);
       return;
     }
@@ -871,13 +1389,17 @@ export function BattlefieldView({
     const clickedUnit = units.find((u) => u.x === x && u.y === y);
     if (clickedUnit) {
       setSelectedHandCard(null);
+      setIsAimingAbility(false);
       setSelectedUnit(clickedUnit);
     }
   };
 
   return (
-    <div className="space-y-6">
-      {/* Banner de Coroa de Ferro de Feitiço Arcano (Darkest Dungeon) */}
+    <div className="relative space-y-4">
+      {/* Camada 1 do Sistema de Biomas: Fundo Atmosférico 2D + Partículas */}
+      <BiomeAtmosphereBackdrop biome={currentBiome} />
+
+      {/* Banner de Coroa de Ferro de Feitiço Arcano */}
       <IronCrownSpellBanner
         spellName={ironCrownSpellName}
         onFinish={() => setIronCrownSpellName(null)}
@@ -895,127 +1417,397 @@ export function BattlefieldView({
         />
       )}
 
-      {/* ======================================================== */}
-      {/* PAINEL SUPERIOR: NÚCLEOS (PLAYER vs IA) */}
-      {/* ======================================================== */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Núcleo do Jogador (Cristal Nexus Solar) */}
-        <div className="p-4 rounded-2xl bg-[#252147]/85 backdrop-blur-md border border-[#F59E0B]/50 shadow-[0_8px_32px_rgba(0,0,0,0.35)] flex items-center justify-between relative overflow-hidden">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-[#1E1B3A] border-2 border-[#F59E0B] text-[#F59E0B] shadow-[0_0_15px_rgba(245,158,11,0.5)] rounded-xl">
-              <Crown className="w-5 h-5 animate-torch" />
-            </div>
-            <div>
-              <span className="text-[9px] uppercase font-gothic tracking-widest text-[#F59E0B] block">
-                Comandante dos Guardiões
-              </span>
-              <h3 className="text-base font-gothic font-black text-[#F8FAFC]">
-                {playerCore.name}
-              </h3>
-            </div>
-          </div>
+      {/* Modal de Seleção de Foto de Perfil (Criaturas Desbloqueadas) */}
+      <ProfileAvatarModal
+        isOpen={isAvatarModalOpen}
+        onClose={() => setIsAvatarModalOpen(false)}
+        currentAvatar={playerAvatar}
+        onSelectAvatar={(next) => setPlayerAvatar(next)}
+        fallbackCreatures={sampleCards
+          .filter((c) => c.category === "MONSTRO")
+          .map((c) => ({
+            id: c.id,
+            name: c.name,
+            type: c.type,
+            category: c.category,
+            rarity: c.rarity,
+            quantity: 3,
+          }))}
+      />
 
-          <div className="text-right">
-            <div className="flex items-center gap-1.5 justify-end text-sm font-numbers font-black text-[#F59E0B]">
-              <Shield className="w-4 h-4 text-[#F59E0B]" />
-              <span>
-                {playerCore.currentHp} / {playerCore.maxHp} HP
+      {/* ======================================================== */}
+      {/* HUD SUPERIOR COM ÍCONES DE CRIATURAS:                    */}
+      {/* Esquerda: Player (Criatura Desbloqueada Clicável) + Mana */}
+      {/* Centro: Placa Hexagonal "Turno X"                        */}
+      {/* Direita: Enemy (Criatura Comandante Inimiga) + Mana      */}
+      {/* ======================================================== */}
+      <div className="flex items-center justify-between gap-2 px-1 sm:px-2 select-none">
+        {/* 1. HUD DO JOGADOR (Esquerda) */}
+        <div className="flex items-center">
+          {/* Moldura Octogonal Clicável com o Ícone da Criatura Desbloqueada do Jogador */}
+          <button
+            type="button"
+            onClick={() => setIsAvatarModalOpen(true)}
+            title={`Foto de Perfil: ${playerAvatar.name} (Clique para trocar entre suas criaturas desbloqueadas)`}
+            className="group relative z-20 w-16 h-16 sm:w-20 sm:h-20 p-[2.5px] bg-gradient-to-br from-[#38BDF8] via-[#A855F7] to-[#1E1B4B] hover:from-[#38BDF8] hover:via-[#C084FC] hover:to-[#38BDF8] shadow-[0_0_22px_rgba(168,85,247,0.55)] shrink-0 cursor-pointer transition-transform duration-200 hover:scale-105"
+            style={{
+              clipPath:
+                "polygon(28% 0%, 72% 0%, 100% 28%, 100% 72%, 72% 100%, 28% 100%, 0% 72%, 0% 28%)",
+            }}
+          >
+            <div
+              className="relative w-full h-full bg-gradient-to-b from-[#23154F] via-[#140D2B] to-[#090612] flex items-center justify-center overflow-hidden p-1.5"
+              style={{
+                clipPath:
+                  "polygon(28% 0%, 72% 0%, 100% 28%, 100% 72%, 72% 100%, 28% 100%, 0% 72%, 0% 28%)",
+              }}
+            >
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(56,189,248,0.28)_0%,transparent_70%)] pointer-events-none" />
+              <CutoutMonsterSprite
+                name={playerAvatar.name}
+                type={playerAvatar.type}
+                category="MONSTRO"
+                isEnemy={false}
+                className="w-full h-full scale-125 translate-y-1"
+              />
+              {/* Overlay sutil no hover indicando troca de foto de perfil */}
+              <div className="absolute inset-x-0 bottom-0 py-0.5 bg-black/75 opacity-0 group-hover:opacity-100 transition-opacity text-[8px] font-gothic font-bold text-[#38BDF8] uppercase tracking-wider text-center">
+                Trocar
+              </div>
+            </div>
+          </button>
+
+          {/* Placa Lateral "Player" + Mana ✦ */}
+          <div
+            className="-ml-4 pl-7 pr-6 py-2 bg-gradient-to-r from-[#161229]/95 via-[#1C1635]/90 to-transparent border-y border-r border-[#4C3F78]/50 flex flex-col justify-center"
+            style={{
+              clipPath: "polygon(0 0, 88% 0, 100% 50%, 88% 100%, 0 100%)",
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <span className="font-gothic font-bold text-sm sm:text-base text-white tracking-wide">
+                Player
+              </span>
+              <span className="text-[10px] font-numbers text-[#38BDF8] bg-[#0F172A]/80 px-1.5 py-0.5 rounded border border-[#38BDF8]/30">
+                {playerCore.currentHp} HP
               </span>
             </div>
-            <div className="w-32 h-2.5 bg-[#121024] border border-white/20 rounded-full mt-1.5 overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-[#38BDF8] via-[#F59E0B] to-[#FEF08A] rounded-full transition-all duration-300"
-                style={{
-                  width: `${(playerCore.currentHp / playerCore.maxHp) * 100}%`,
-                }}
-              />
+            <div className="mt-0.5 flex items-center gap-2">
+              <AbyssalManaDiamond cost={currentMana} size="md" />
+              <button
+                type="button"
+                onClick={() => setIsAvatarModalOpen(true)}
+                className="text-[9px] font-parchment text-[#C084FC] hover:text-[#38BDF8] underline cursor-pointer hidden sm:inline"
+              >
+                Trocar Avatar
+              </button>
             </div>
           </div>
         </div>
 
-        {/* Núcleo da IA (Cristal Nexus Astral) */}
-        <div className="p-4 rounded-2xl bg-[#252147]/85 backdrop-blur-md border border-[#F43F5E]/50 shadow-[0_8px_32px_rgba(0,0,0,0.35)] flex items-center justify-between relative overflow-hidden">
-          <div>
-            <div className="flex items-center gap-1.5 text-sm font-numbers font-black text-[#F43F5E]">
-              <Shield className="w-4 h-4 text-[#F43F5E]" />
-              <span>
-                {aiCore.currentHp} / {aiCore.maxHp} HP
+        {/* 2. BANNER CENTRAL "Turno X" + SELETOR DE BIOMA + CONTROLE DE ZOOM */}
+        <div className="flex flex-col items-center gap-1.5">
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <div
+              className="p-[2px] bg-[#09090B] rounded-xl shadow-[0_5px_0_#09090B]"
+            >
+              <div
+                className="px-5 sm:px-7 py-1.5 rounded-[10px] flex items-center justify-center border border-white/15"
+                style={{
+                  backgroundColor: BIOME_CONFIGS[currentBiome].badgeBg,
+                }}
+              >
+                <span className="font-gothic font-bold text-sm sm:text-base text-[#F8FAFC] tracking-wider">
+                  Turno {turnNumber}
+                </span>
+              </div>
+            </div>
+
+            {/* Indicador e Seletor de Bioma 2D Cartoon */}
+            <div className="flex items-center gap-1 bg-[#141418]/95 border-2 border-[#09090B] shadow-[0_4px_0_#09090B] px-2 py-1 rounded-xl">
+              <span className="hidden md:inline text-[10px] font-gothic font-bold uppercase tracking-wider text-[#94A3B8] mr-1">
+                Bioma:
+              </span>
+              {BIOME_ORDER.map((b) => {
+                const cfg = BIOME_CONFIGS[b];
+                const isActive = currentBiome === b;
+                return (
+                  <button
+                    key={b}
+                    type="button"
+                    onClick={() => {
+                      setCurrentBiome(b);
+                      setBattleMessage({
+                        text: `${cfg.emoji} Cenário alterado para: ${cfg.name} — ${cfg.description}`,
+                        type: "info",
+                      });
+                    }}
+                    title={`${cfg.name}: ${cfg.description}`}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-gothic font-bold transition-all cursor-pointer border ${
+                      isActive
+                        ? "border-[#09090B] scale-105 shadow-[0_2px_0_#09090B]"
+                        : "border-transparent opacity-65 hover:opacity-100 hover:bg-white/10 text-[#E2E8F0]"
+                    }`}
+                    style={
+                      isActive
+                        ? {
+                            backgroundColor: cfg.badgeBg,
+                            color: cfg.badgeText,
+                            borderColor: cfg.badgeBorder,
+                          }
+                        : undefined
+                    }
+                  >
+                    <span>{cfg.emoji}</span>
+                    <span className="hidden lg:inline">{cfg.shortName}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Controle Rápido de Zoom (- / +) */}
+            <div className="hidden sm:flex items-center gap-1 bg-[#141418]/95 border-2 border-[#09090B] shadow-[0_4px_0_#09090B] px-2 py-1 rounded-xl text-[10px] font-numbers text-[#CBD5E1]">
+              <button
+                type="button"
+                onClick={() =>
+                  setBoardZoom((z) => Math.max(0.7, Number((z - 0.06).toFixed(2))))
+                }
+                className="px-1.5 py-0.5 rounded bg-[#27272A] hover:bg-[#3F3F46] text-white font-bold cursor-pointer"
+                title="Diminuir Zoom"
+              >
+                -
+              </button>
+              <span className="min-w-[34px] text-center font-bold text-[#FACC15]">
+                {Math.round(boardZoom * 100)}%
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setBoardZoom((z) => Math.min(1.3, Number((z + 0.06).toFixed(2))))
+                }
+                className="px-1.5 py-0.5 rounded bg-[#27272A] hover:bg-[#3F3F46] text-white font-bold cursor-pointer"
+                title="Aumentar Zoom"
+              >
+                +
+              </button>
+            </div>
+          </div>
+          {battleMessage && (
+            <span className="text-[11px] font-parchment text-[#F8FAFC] bg-[#09090B]/85 px-3 py-0.5 rounded-full border border-white/15 max-w-xl truncate">
+              {battleMessage.text}
+            </span>
+          )}
+        </div>
+
+        {/* 3. HUD DO INIMIGO (Direita) */}
+        <div className="flex items-center">
+          {/* Placa Lateral "Enemy" + Mana ✦ */}
+          <div
+            className="-mr-4 pr-7 pl-6 py-2 bg-gradient-to-l from-[#2A1222]/95 via-[#241124]/90 to-transparent border-y border-l border-[#881337]/60 flex flex-col items-end justify-center"
+            style={{
+              clipPath: "polygon(12% 0, 100% 0, 100% 100%, 12% 100%, 0 50%)",
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-numbers text-[#F43F5E] bg-[#1F0913]/80 px-1.5 py-0.5 rounded border border-[#F43F5E]/30">
+                {aiCore.currentHp} HP
+              </span>
+              <span className="font-gothic font-bold text-sm sm:text-base text-white tracking-wide">
+                Enemy
               </span>
             </div>
-            <div className="w-32 h-2.5 bg-[#121024] border border-white/20 rounded-full mt-1.5 overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-[#9333EA] via-[#E11D48] to-[#F43F5E] rounded-full transition-all duration-300"
-                style={{
-                  width: `${(aiCore.currentHp / aiCore.maxHp) * 100}%`,
-                }}
-              />
+            <div className="mt-0.5">
+              <AbyssalManaDiamond cost={aiMana} size="md" />
             </div>
           </div>
 
-          <div className="flex items-center gap-3 text-right">
-            <div>
-              <span className="text-[9px] uppercase font-gothic tracking-widest text-[#F43F5E] flex items-center gap-1 justify-end">
-                <Brain className="w-3 h-3" /> IA Astral &middot; Fase {stageNumber}
-              </span>
-              <h3 className="text-base font-gothic font-black text-[#F8FAFC]">
-                {aiCore.name}
-              </h3>
-            </div>
-            <div className="p-2.5 bg-[#1E1B3A] border-2 border-[#F43F5E] text-[#F43F5E] shadow-[0_0_15px_rgba(244,63,94,0.5)] rounded-xl">
-              <Skull className="w-5 h-5 animate-pulse" />
+          {/* Moldura Octogonal com o Ícone da Criatura Inimiga */}
+          <div
+            title={`Comandante Inimigo: ${enemyAvatar.name}`}
+            className="relative z-20 w-16 h-16 sm:w-20 sm:h-20 p-[2.5px] bg-gradient-to-bl from-[#F43F5E] via-[#881337] to-[#1E1B2E] shadow-[0_0_22px_rgba(244,63,94,0.5)] shrink-0"
+            style={{
+              clipPath:
+                "polygon(28% 0%, 72% 0%, 100% 28%, 100% 72%, 72% 100%, 28% 100%, 0% 72%, 0% 28%)",
+            }}
+          >
+            <div
+              className="relative w-full h-full bg-gradient-to-b from-[#3B0A1E] via-[#1F0712] to-[#0D0409] flex items-center justify-center overflow-hidden p-1.5"
+              style={{
+                clipPath:
+                  "polygon(28% 0%, 72% 0%, 100% 28%, 100% 72%, 72% 100%, 28% 100%, 0% 72%, 0% 28%)",
+              }}
+            >
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(244,63,94,0.32)_0%,transparent_70%)] pointer-events-none" />
+              <CutoutMonsterSprite
+                name={enemyAvatar.name}
+                type={enemyAvatar.type}
+                category="MONSTRO"
+                isEnemy={true}
+                className="w-full h-full scale-125 translate-y-1"
+              />
             </div>
           </div>
         </div>
       </div>
 
       {/* ======================================================== */}
-      {/* BARRA DE MANA, LIMITE 7/7 E CONTROLE DE TURNO */}
+      {/* PAINEL DE COMANDO DE HABILIDADE ATIVA ÚNICA (QUANDO SELECIONADO) */}
       {/* ======================================================== */}
-      <ManaBar
-        currentMana={currentMana}
-        playerUnitsCount={playerUnits.length}
-        turnNumber={turnNumber}
-        onEndTurn={handleEndTurn}
-        isAiTurn={isAiTurn}
-      />
+      {selectedUnit && selectedUnitAbility && (
+        <div className="mx-auto max-w-4xl bg-[#0E0B1A]/95 border-2 border-[#A855F7] rounded-xl px-4 py-2.5 shadow-[0_6px_0_#09090B,0_0_25px_rgba(168,85,247,0.45)] flex flex-wrap items-center justify-between gap-3 select-none">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-11 h-11 rounded-lg bg-[#1C1635] border border-[#C084FC]/60 p-1 shrink-0 flex items-center justify-center">
+              <CutoutMonsterSprite
+                name={selectedUnit.card.name}
+                type={selectedUnit.card.type}
+                category="MONSTRO"
+                isEnemy={selectedUnit.owner === "AI"}
+                className="w-full h-full scale-110"
+              />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-gothic font-bold text-sm text-white">
+                  {selectedUnit.card.name}
+                </span>
+                <span className="text-[10px] font-numbers font-bold px-1.5 py-0.5 rounded bg-[#064E3B] border border-[#34D399] text-[#A7F3D0]">
+                  ⚡ Ações: {selectedUnit.actionsRemaining ?? MAX_UNIT_ACTIONS_PER_TURN}/
+                  {MAX_UNIT_ACTIONS_PER_TURN}
+                </span>
+                <span className="text-[10px] font-numbers font-bold px-1.5 py-0.5 rounded bg-[#3B0764] border border-[#C084FC] text-[#FACC15]">
+                  ⚡ {selectedUnitAbility.name}
+                </span>
+                <span className="text-[10px] font-numbers text-[#CBD5E1]">
+                  Recarga: {selectedUnitAbility.cooldown}T &bull; Alcance:{" "}
+                  {selectedUnitAbility.range === 0
+                    ? "Ao redor (3x3)"
+                    : `${selectedUnitAbility.range} casas`}
+                </span>
+              </div>
+              <p className="text-[11px] font-parchment text-[#E2E8F0] mt-0.5 line-clamp-1">
+                {selectedUnitAbility.description}
+              </p>
+            </div>
+          </div>
 
-      {/* Mensagem de Feedback da Ação (Estilo Vidro Arcano) */}
-      {battleMessage && (
-        <div
-          className={`flex items-center gap-3 px-4 py-2.5 rounded-xl border font-parchment text-sm backdrop-blur-md shadow-lg ${
-            battleMessage.type === "success"
-              ? "bg-[#18392B]/85 border-[#10B981] text-[#A7F3D0]"
-              : battleMessage.type === "warn"
-              ? "bg-[#3D1424]/85 border-[#F43F5E] text-[#FECDD3]"
-              : "bg-[#252147]/85 border-[#38BDF8]/60 text-[#F8FAFC]"
-          }`}
-        >
-          {isAiTurn ? (
-            <Bot className="w-4 h-4 text-[#d8b4fe] animate-spin" />
-          ) : battleMessage.type === "success" ? (
-            <CheckCircle2 className="w-4 h-4 text-[#4ade80] shrink-0" />
-          ) : battleMessage.type === "warn" ? (
-            <AlertCircle className="w-4 h-4 text-[#B82923] shrink-0" />
-          ) : (
-            <Info className="w-4 h-4 text-[#F29F3D] shrink-0" />
+          {selectedUnit.owner === "PLAYER" && !isAiTurn && (
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {/* Botão 1: Mover / Atacar (Modo Padrão) */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAimingAbility(false);
+                  setBattleMessage({
+                    text: `⚔️ Modo Mover / Atacar ativo para "${selectedUnit.card.name}".`,
+                    type: "info",
+                  });
+                }}
+                className={`px-3 py-1.5 rounded-lg font-gothic font-bold text-xs border-2 transition-all flex items-center gap-1.5 cursor-pointer ${
+                  !isAimingAbility
+                    ? "bg-[#0284C7] border-[#38BDF8] text-white shadow-[0_3px_0_#09090B,0_0_12px_rgba(56,189,248,0.6)]"
+                    : "bg-[#18181B] border-[#3F3F46] text-[#CBD5E1] hover:bg-[#27272A]"
+                }`}
+              >
+                <Swords className="w-3.5 h-3.5 text-[#7DD3FC]" />
+                <span>Mover / Atacar</span>
+              </button>
+
+              {/* Botão 2: Habilidade Única da Criatura */}
+              {(selectedUnit.actionsRemaining ?? MAX_UNIT_ACTIONS_PER_TURN) <= 0 ? (
+                <button
+                  type="button"
+                  disabled
+                  className="px-3.5 py-1.5 rounded-lg bg-[#18181B] border-2 border-[#3F3F46] text-xs font-gothic font-bold text-[#94A3B8] opacity-75 cursor-not-allowed"
+                >
+                  Sem ações restantes (0/{MAX_UNIT_ACTIONS_PER_TURN})
+                </button>
+              ) : (selectedUnit.abilityCooldown ?? 0) > 0 ? (
+                <button
+                  type="button"
+                  disabled
+                  className="px-3.5 py-1.5 rounded-lg bg-[#18181B] border-2 border-[#3F3F46] text-xs font-gothic font-bold text-[#94A3B8] opacity-75 cursor-not-allowed"
+                >
+                  ⏳ Em Recarga ({selectedUnit.abilityCooldown} turnos)
+                </button>
+              ) : isAimingAbility ? (
+                <div className="flex items-center gap-2">
+                  {selectedUnitAbility.targetType === "SELF_AOE" && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        executeSelectedUnitAbilityAt(
+                          selectedUnit.x,
+                          selectedUnit.y
+                        )
+                      }
+                      className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-[#10B981] to-[#059669] hover:brightness-110 text-[#09090B] font-gothic font-black text-xs border-2 border-[#09090B] shadow-[0_3px_0_#09090B] cursor-pointer"
+                    >
+                      💥 Confirmar {selectedUnitAbility.name}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsAimingAbility(false)}
+                    className="px-3 py-1.5 rounded-lg bg-[#EF4444]/20 hover:bg-[#EF4444]/40 border border-[#EF4444] text-xs font-gothic font-bold text-[#FCA5A5] cursor-pointer"
+                  >
+                    Cancelar Mira
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const validTargets = getValidAbilityTargetTiles(
+                      selectedUnit,
+                      selectedUnitAbility,
+                      grid,
+                      units
+                    );
+                    if (validTargets.length === 0) {
+                      setBattleMessage({
+                        text: `Nenhum alvo válido no alcance para "${selectedUnitAbility.name}"!`,
+                        type: "warn",
+                      });
+                      return;
+                    }
+                    setIsAimingAbility(true);
+                    setBattleMessage({
+                      text:
+                        selectedUnitAbility.targetType === "SELF_AOE"
+                          ? `⚡ "${selectedUnitAbility.name}" pronta! Clique em "Confirmar ${selectedUnitAbility.name}" ou na área destacada.`
+                          : `⚡ Modo de Mira: Clique em uma casa destacada para usar "${selectedUnitAbility.name}"!`,
+                      type: "info",
+                    });
+                  }}
+                  className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-[#A855F7] via-[#9333EA] to-[#10B981] hover:brightness-110 text-white font-gothic font-bold text-xs border-2 border-[#09090B] shadow-[0_3px_0_#09090B,0_0_16px_rgba(168,85,247,0.85)] flex items-center gap-1.5 cursor-pointer animate-pulse"
+                >
+                  <Zap className="w-3.5 h-3.5 text-[#FACC15]" />
+                  <span>Usar {selectedUnitAbility.name}</span>
+                </button>
+              )}
+            </div>
           )}
-          <span className="leading-snug">{battleMessage.text}</span>
         </div>
       )}
 
       {/* ======================================================== */}
-      {/* O TABULEIRO TÁTICO COM LINHAS DE VISÃO E ARREMESSO */}
+      {/* O TABULEIRO TÁTICO EM PLATAFORMA DE RUÍNAS ABISSAIS       */}
       {/* ======================================================== */}
-      <div className="flex flex-col items-center space-y-4">
+      <div className="flex flex-col items-center">
         <TacticalGrid
           grid={grid}
           units={units}
           cores={cores}
+          biome={currentBiome}
           selectedUnit={selectedUnit}
           hoveredUnit={hoveredUnit}
           hoveredTile={hoveredTile}
           movementTiles={movementTiles}
           attackTiles={attackTiles}
+          abilityTiles={abilityTiles}
+          aoePreviewTiles={aoePreviewTiles}
+          isDashAbility={selectedUnitAbility?.effectType === "DASH_JUMP"}
+          activeAbilityVfx={activeAbilityVfx}
           floatingDamages={floatingDamages}
           hitUnitId={hitUnitId}
           dyingUnitId={dyingUnitId}
@@ -1032,16 +1824,18 @@ export function BattlefieldView({
           onSelectUnit={(u) => {
             if (isAiTurn) return;
             setSelectedHandCard(null);
+            setIsAimingAbility(false);
             setSelectedUnit((prev) => (prev?.id === u?.id ? null : u));
           }}
           onHoverUnit={(u) => setHoveredUnit(u)}
           onHoverTile={(coord) => setHoveredTile(coord)}
           onTileClick={handleTileClick}
+          zoomLevel={boardZoom}
         />
       </div>
 
       {/* ======================================================== */}
-      {/* MÃO DE CARTAS DO JOGADOR (COM FEITIÇOS INSTANTÂNEOS) */}
+      {/* BARRA INFERIOR: MENU (ESQ) + MÃO DE CARTAS + FINALIZAR TURNO (DIR) */}
       {/* ======================================================== */}
       <HandCards
         hand={hand}
@@ -1051,6 +1845,9 @@ export function BattlefieldView({
         selectedCard={selectedHandCard}
         onSelectCard={handleSelectHandCard}
         onCancelSelection={() => setSelectedHandCard(null)}
+        onEndTurn={handleEndTurn}
+        isAiTurn={isAiTurn}
+        onRestartBattle={handleRestartBattle}
       />
     </div>
   );

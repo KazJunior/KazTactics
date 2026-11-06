@@ -134,5 +134,22 @@ export interface FloatingDamage {
   y: number;
   damage: number;
   isFatal?: boolean;
+  label?: string;
+  variant?: "DAMAGE" | "POISON" | "HEAL" | "ABILITY";
+}
+
+/**
+ * Calcula o dano efetivo de uma unidade considerando buffs/debuffs ativos (como WEAKENED -30%)
+ */
+export function getEffectiveUnitDamage(unit: BoardUnit): number {
+  const baseDamage = unit.card.damage || 25;
+  const weakened = (unit.statusEffects || []).find(
+    (s) => s.type === "WEAKENED" && s.turnsLeft > 0
+  );
+  if (weakened) {
+    const factor = Math.max(0.1, 1 - (weakened.value || 30) / 100);
+    return Math.max(1, Math.round(baseDamage * factor));
+  }
+  return baseDamage;
 }
 

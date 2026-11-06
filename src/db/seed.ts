@@ -2,6 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import * as dotenv from "dotenv";
 import * as schema from "./schema";
+import { EXPANDED_CARDS_DATA } from "../lib/expandedCardsCatalog";
 import { eq } from "drizzle-orm";
 
 dotenv.config({ path: ".env" });
@@ -29,68 +30,68 @@ const allCardsData: schema.NewCard[] = [
     category: "MONSTRO",
     type: "ARTROPODES",
     manaCost: 1,
-    hp: 55,
-    damage: 15,
-    movementTiles: 3,
+    hp: 150,
+    damage: 55,
+    movementTiles: 2,
     rangeTiles: 1,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/beetle_scout.png",
+    spriteUrl: "/sprites/beetle-scout.png",
   },
   {
     name: "Aranha Tece-Sombras",
-    description: "Cospe teias pegajosas por cima de obstáculos para incapacitar inimigos à distância.",
+    description: "Cospe teias densas em um alvo, causando dano e diminuindo seu alcance de movimento.",
     rarity: "INCOMUM",
     category: "MONSTRO",
     type: "ARTROPODES",
     manaCost: 2,
-    hp: 70,
-    damage: 25,
-    movementTiles: 3,
-    rangeTiles: 2,
-    attackType: "ARREMESSO",
-    spriteUrl: "/sprites/shadow_spider.png",
+    hp: 150,
+    damage: 55,
+    movementTiles: 2,
+    rangeTiles: 1,
+    attackType: "LINE_OF_SIGHT",
+    spriteUrl: "/sprites/shadow-spider.png",
   },
   {
     name: "Louva-a-Deus Ceifador",
-    description: "Predador implacável com lâminas quitinosas que cortam através da vanguarda oponente.",
+    description: "Predador implacável com lâminas quitinosas afiadas. Realiza cortes rápidos e ganha ação adicional se abater o alvo.",
     rarity: "RARO",
     category: "MONSTRO",
     type: "ARTROPODES",
     manaCost: 4,
-    hp: 130,
-    damage: 55,
-    movementTiles: 3,
+    hp: 170,
+    damage: 80,
+    movementTiles: 2,
     rangeTiles: 1,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/reaper_mantis.png",
+    spriteUrl: "/sprites/reaper-mantis.png",
   },
   {
     name: "Centopeia de Carapaça Titânica",
-    description: "Monstruosidade couraçada de grande porte com capacidade de absorver ataques massivos.",
+    description: "Monstruosidade couraçada colossal que atinge todas as 8 casas ao redor causando dano em área e envenenando alvos.",
     rarity: "EPICO",
     category: "MONSTRO",
     type: "ARTROPODES",
     manaCost: 7,
     hp: 270,
     damage: 75,
-    movementTiles: 2,
+    movementTiles: 3,
     rangeTiles: 1,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/titanic_centipede.png",
+    spriteUrl: "/sprites/titanic-centipede.png",
   },
   {
     name: "Rainha da Colmeia Quitina",
-    description: "Matriarca lendária que dispara agulhões venenosos por cima de qualquer barricada.",
+    description: "Matriarca lendária que bombardeia uma zona 3x3 inteira à distância com chuva de agulhões reais.",
     rarity: "LENDARIO",
     category: "MONSTRO",
     type: "ARTROPODES",
-    manaCost: 9,
-    hp: 350,
-    damage: 95,
-    movementTiles: 2,
+    manaCost: 6,
+    hp: 180,
+    damage: 65,
+    movementTiles: 1,
     rangeTiles: 3,
     attackType: "ARREMESSO",
-    spriteUrl: "/sprites/queen_chitin.png",
+    spriteUrl: "/sprites/chitin-hive-queen.png",
   },
 
   // -----------------------------------------------------------------------
@@ -108,7 +109,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 4,
     rangeTiles: 1,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/grey_wolf.png",
+    spriteUrl: "/sprites/grey-wolf-hunter.png",
   },
   {
     name: "Urso da Tundra Enraivecido",
@@ -122,7 +123,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 2,
     rangeTiles: 1,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/tundra_bear.png",
+    spriteUrl: "/sprites/tundra-raging-bear.png",
   },
   {
     name: "Grifo dos Picos Nevados",
@@ -136,7 +137,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 4,
     rangeTiles: 2,
     attackType: "ARREMESSO",
-    spriteUrl: "/sprites/snow_griffin.png",
+    spriteUrl: "/sprites/snowy-griffin.png",
   },
   {
     name: "Quimera das Savanas",
@@ -150,7 +151,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 3,
     rangeTiles: 2,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/savanna_chimera.png",
+    spriteUrl: "/sprites/savanna-chimera.png",
   },
   {
     name: "Behemoth Primordial",
@@ -164,7 +165,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 2,
     rangeTiles: 2,
     attackType: "ARREMESSO",
-    spriteUrl: "/sprites/primordial_behemoth.png",
+    spriteUrl: "/sprites/primordial-behemoth.png",
   },
 
   // -----------------------------------------------------------------------
@@ -182,7 +183,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 2,
     rangeTiles: 1,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/ghoul_crawler.png",
+    spriteUrl: "/sprites/crawling-ghoul.png",
   },
   {
     name: "Arqueiro Esqueleto Maldito",
@@ -196,7 +197,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 2,
     rangeTiles: 4,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/skeleton_sniper.png",
+    spriteUrl: "/sprites/cursed-skeleton-archer.png",
   },
   {
     name: "Cavaleiro da Morte Decrépito",
@@ -210,7 +211,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 3,
     rangeTiles: 1,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/death_knight.png",
+    spriteUrl: "/sprites/death-knight.png",
   },
   {
     name: "Necromante do Sepulcro",
@@ -224,7 +225,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 2,
     rangeTiles: 4,
     attackType: "ARREMESSO",
-    spriteUrl: "/sprites/grave_necromancer.png",
+    spriteUrl: "/sprites/grave-necromancer.png",
   },
   {
     name: "Lich Rei das Sombras",
@@ -238,7 +239,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 2,
     rangeTiles: 4,
     attackType: "ARREMESSO",
-    spriteUrl: "/sprites/lich_king.png",
+    spriteUrl: "/sprites/shadow-lich-king.png",
   },
 
   // -----------------------------------------------------------------------
@@ -256,7 +257,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 4,
     rangeTiles: 2,
     attackType: "ARREMESSO",
-    spriteUrl: "/sprites/wisp_illusion.png",
+    spriteUrl: "/sprites/illusory-wisp.png",
   },
   {
     name: "Banshee Lamuriante",
@@ -270,7 +271,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 3,
     rangeTiles: 3,
     attackType: "ARREMESSO",
-    spriteUrl: "/sprites/banshee_mourn.png",
+    spriteUrl: "/sprites/mourning-banshee.png",
   },
   {
     name: "Poltergeist Telúrico",
@@ -284,7 +285,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 2,
     rangeTiles: 3,
     attackType: "ARREMESSO",
-    spriteUrl: "/sprites/poltergeist.png",
+    spriteUrl: "/sprites/telluric-poltergeist.png",
   },
   {
     name: "Aparição Vingativa",
@@ -298,7 +299,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 3,
     rangeTiles: 2,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/vengeful_wraith.png",
+    spriteUrl: "/sprites/vengeful-wraith.png",
   },
   {
     name: "Avatar da Tempestade Astral",
@@ -312,7 +313,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 3,
     rangeTiles: 4,
     attackType: "ARREMESSO",
-    spriteUrl: "/sprites/astral_storm.png",
+    spriteUrl: "/sprites/astral-storm-avatar.png",
   },
 
   // -----------------------------------------------------------------------
@@ -330,7 +331,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 2,
     rangeTiles: 1,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/shield_recruit.png",
+    spriteUrl: "/sprites/tower-shield-recruit.png",
   },
   {
     name: "Caçadora Élfica da Fronteira",
@@ -344,7 +345,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 3,
     rangeTiles: 4,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/elf_ranger.png",
+    spriteUrl: "/sprites/elven-frontier-ranger.png",
   },
   {
     name: "Lanceiro Real de Aço",
@@ -358,7 +359,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 2,
     rangeTiles: 2,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/royal_pikeman.png",
+    spriteUrl: "/sprites/royal-steel-pikeman.png",
   },
   {
     name: "Mago de Batalha Templário",
@@ -372,7 +373,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 2,
     rangeTiles: 3,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/battle_mage.png",
+    spriteUrl: "/sprites/templar-battle-mage.png",
   },
   {
     name: "Lorde Comandante da Aliança",
@@ -386,7 +387,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 2,
     rangeTiles: 1,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/lord_commander.png",
+    spriteUrl: "/sprites/alliance-lord-commander.png",
   },
 
   // -----------------------------------------------------------------------
@@ -404,7 +405,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 4,
     rangeTiles: 2,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/steam_drone.png",
+    spriteUrl: "/sprites/steam-scout-drone.png",
   },
   {
     name: "Sentinela de Engrenagens",
@@ -418,7 +419,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 1,
     rangeTiles: 3,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/gear_sentinel.png",
+    spriteUrl: "/sprites/gear-sentinel.png",
   },
   {
     name: "Catapulta a Vapor Blindada",
@@ -432,7 +433,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 1,
     rangeTiles: 5,
     attackType: "ARREMESSO",
-    spriteUrl: "/sprites/steam_catapult.png",
+    spriteUrl: "/sprites/steam-catapult.png",
   },
   {
     name: "Colosso de Latão e Vapor",
@@ -446,7 +447,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 2,
     rangeTiles: 1,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/brass_colossus.png",
+    spriteUrl: "/sprites/brass-steam-colossus.png",
   },
   {
     name: "Leviatã Bélico Autônomo",
@@ -460,7 +461,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 1,
     rangeTiles: 5,
     attackType: "ARREMESSO",
-    spriteUrl: "/sprites/war_leviathan.png",
+    spriteUrl: "/sprites/autonomous-war-leviathan.png",
   },
 
   // -----------------------------------------------------------------------
@@ -478,7 +479,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 3,
     rangeTiles: 1,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/satyr_dancer.png",
+    spriteUrl: "/sprites/woodland-satyr-dancer.png",
   },
   {
     name: "Minotauro do Labirinto",
@@ -492,7 +493,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 2,
     rangeTiles: 1,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/minotaur.png",
+    spriteUrl: "/sprites/labyrinth-minotaur.png",
   },
   {
     name: "Hidra dos Pântanos Sombrios",
@@ -506,7 +507,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 2,
     rangeTiles: 2,
     attackType: "LINE_OF_SIGHT",
-    spriteUrl: "/sprites/hydra.png",
+    spriteUrl: "/sprites/swamp-hydra.png",
   },
   {
     name: "Fênix Renascida do Fogo",
@@ -520,7 +521,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 3,
     rangeTiles: 3,
     attackType: "ARREMESSO",
-    spriteUrl: "/sprites/phoenix_fire.png",
+    spriteUrl: "/sprites/rebirth-fire-phoenix.png",
   },
   {
     name: "Dragão Ancestral de Platina",
@@ -534,7 +535,7 @@ const allCardsData: schema.NewCard[] = [
     movementTiles: 3,
     rangeTiles: 3,
     attackType: "ARREMESSO",
-    spriteUrl: "/sprites/platinum_dragon.png",
+    spriteUrl: "/sprites/ancestral-platinum-dragon.png",
   },
 
   // -----------------------------------------------------------------------
@@ -558,7 +559,7 @@ const allCardsData: schema.NewCard[] = [
       healAmount: 45,
       animation: "HOLY_GLOW",
     },
-    spriteUrl: "/sprites/spells/healing_touch.png",
+    spriteUrl: "/sprites/healing-touch.png",
   },
   {
     name: "Raio de Gelo Paralisante",
@@ -583,7 +584,7 @@ const allCardsData: schema.NewCard[] = [
       },
       statusEffect: "SLOWED",
     },
-    spriteUrl: "/sprites/spells/frost_ray.png",
+    spriteUrl: "/sprites/frost-ray.png",
   },
   {
     name: "Fúria do Berzerker",
@@ -607,7 +608,7 @@ const allCardsData: schema.NewCard[] = [
       },
       statusEffect: "ENRAGED",
     },
-    spriteUrl: "/sprites/spells/berserker_fury.png",
+    spriteUrl: "/sprites/berserker-fury.png",
   },
   {
     name: "Cristais de Mana Fluídos",
@@ -627,7 +628,7 @@ const allCardsData: schema.NewCard[] = [
       manaBonus: 2,
       instant: true,
     },
-    spriteUrl: "/sprites/spells/mana_crystals.png",
+    spriteUrl: "/sprites/fluid-mana-crystals.png",
   },
   {
     name: "Bola de Fogo Concentrada",
@@ -647,7 +648,7 @@ const allCardsData: schema.NewCard[] = [
       damage: 65,
       damageElement: "FIRE",
     },
-    spriteUrl: "/sprites/spells/fireball.png",
+    spriteUrl: "/sprites/concentrated-fireball.png",
   },
   {
     name: "Chuva de Flechas Arcanas",
@@ -668,7 +669,7 @@ const allCardsData: schema.NewCard[] = [
       damage: 45,
       damageElement: "ARCANE",
     },
-    spriteUrl: "/sprites/spells/arcane_barrage.png",
+    spriteUrl: "/sprites/arcane-arrow-barrage.png",
   },
   {
     name: "Égide Divina de Proteção",
@@ -688,7 +689,7 @@ const allCardsData: schema.NewCard[] = [
       shieldAmount: 80,
       durationTurns: 3,
     },
-    spriteUrl: "/sprites/spells/divine_shield.png",
+    spriteUrl: "/sprites/divine-protection-aegis.png",
   },
   {
     name: "Correntes Etéreas Seladoras",
@@ -709,7 +710,7 @@ const allCardsData: schema.NewCard[] = [
       rootDurationTurns: 1,
       statusEffect: "IMMOBILIZED",
     },
-    spriteUrl: "/sprites/spells/ethereal_chains.png",
+    spriteUrl: "/sprites/ethereal-binding-chains.png",
   },
   {
     name: "Torrente de Regeneração Coletiva",
@@ -729,7 +730,7 @@ const allCardsData: schema.NewCard[] = [
       areaRadius: 2,
       healAmount: 65,
     },
-    spriteUrl: "/sprites/spells/mass_regeneration.png",
+    spriteUrl: "/sprites/collective-regeneration-torrent.png",
   },
   {
     name: "Meteoro Devastador do Cataclismo",
@@ -751,7 +752,7 @@ const allCardsData: schema.NewCard[] = [
       burnDamagePerTurn: 20,
       burnDurationTurns: 2,
     },
-    spriteUrl: "/sprites/spells/cataclysm_meteor.png",
+    spriteUrl: "/sprites/cataclysm-meteor.png",
   },
   {
     name: "Tempestade de Relâmpagos em Cadeia",
@@ -772,7 +773,7 @@ const allCardsData: schema.NewCard[] = [
       damagePerBounce: 75,
       damageElement: "LIGHTNING",
     },
-    spriteUrl: "/sprites/spells/lightning_storm.png",
+    spriteUrl: "/sprites/chain-lightning-storm.png",
   },
   {
     name: "Sobrecarga de Éter Cósmico",
@@ -792,7 +793,7 @@ const allCardsData: schema.NewCard[] = [
       manaBonus: 4,
       instant: true,
     },
-    spriteUrl: "/sprites/spells/ether_overload.png",
+    spriteUrl: "/sprites/cosmic-ether-overload.png",
   },
   {
     name: "Dança dos Ventos Célere",
@@ -816,7 +817,7 @@ const allCardsData: schema.NewCard[] = [
       },
       statusImmunity: ["SLOWED"],
     },
-    spriteUrl: "/sprites/spells/wind_stride.png",
+    spriteUrl: "/sprites/swift-wind-dance.png",
   },
   {
     name: "Praga da Decomposição Vital",
@@ -841,7 +842,7 @@ const allCardsData: schema.NewCard[] = [
         durationTurns: 3,
       },
     },
-    spriteUrl: "/sprites/spells/decay_plague.png",
+    spriteUrl: "/sprites/decay-plague.png",
   },
   {
     name: "Julgamento do Apocalipse",
@@ -862,8 +863,9 @@ const allCardsData: schema.NewCard[] = [
       ignoreArmor: true,
       animation: "CELESTIAL_SMITE",
     },
-    spriteUrl: "/sprites/spells/apocalypse_judgment.png",
+    spriteUrl: "/sprites/apocalypse-judgment.png",
   },
+  ...EXPANDED_CARDS_DATA,
 ];
 
 // =========================================================================

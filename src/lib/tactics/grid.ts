@@ -1,20 +1,22 @@
 import { GridTile, TileType, BoardUnit, BoardCore } from "@/types/game";
 
-export const BOARD_WIDTH = 11;
-export const BOARD_HEIGHT = 7;
+export const BOARD_WIDTH = 15;
+export const BOARD_HEIGHT = 9;
 
 /**
- * Cria a matriz padrão do tabuleiro 11x7 com obstáculos estratégicos e zonas de spawn
+ * Cria a matriz padrão do tabuleiro expandido 15x9 com obstáculos estratégicos e zonas de spawn
  */
 export function createDefaultGrid(): GridTile[][] {
   const grid: GridTile[][] = [];
+  const coreY = Math.floor(BOARD_HEIGHT / 2); // y = 4
 
-  // Posições pré-definidas de obstáculos altos centrais (choke points e coberturas)
+  // Posições pré-definidas de obstáculos altos distribuídos na arena 15x9
   const obstacleCoordinates = new Set<string>([
-    "3,1", "3,5",
-    "5,2", "5,4",
-    "7,1", "7,5",
-    "4,3", "6,3", // Coberturas centrais para testar Line of Sight vs Arremesso
+    "4,2", "4,3", "4,6",
+    "6,1", "6,5", "6,7",
+    "7,4",
+    "8,1", "8,3", "8,7",
+    "10,2", "10,5", "10,6",
   ]);
 
   for (let y = 0; y < BOARD_HEIGHT; y++) {
@@ -22,12 +24,12 @@ export function createDefaultGrid(): GridTile[][] {
     for (let x = 0; x < BOARD_WIDTH; x++) {
       let type: TileType = "EMPTY";
 
-      // Zonas de Invocação do Jogador (colunas 0 e 1, exceto o núcleo em 0,3)
-      if (x <= 1 && !(x === 0 && y === 3)) {
+      // Zonas de Invocação do Jogador (colunas 0 e 1, exceto o núcleo em 0,coreY)
+      if (x <= 1 && !(x === 0 && y === coreY)) {
         type = "PLAYER_SPAWN";
       }
-      // Zonas de Invocação da IA (colunas 9 e 10, exceto o núcleo em 10,3)
-      else if (x >= BOARD_WIDTH - 2 && !(x === BOARD_WIDTH - 1 && y === 3)) {
+      // Zonas de Invocação da IA (últimas 2 colunas, exceto o núcleo em 14,coreY)
+      else if (x >= BOARD_WIDTH - 2 && !(x === BOARD_WIDTH - 1 && y === coreY)) {
         type = "AI_SPAWN";
       }
       // Obstáculos altos que bloqueiam movimento e linha de visão direta
@@ -43,52 +45,73 @@ export function createDefaultGrid(): GridTile[][] {
   return grid;
 }
 
-/**
- * Algoritmo BFS para calcular as casas válidas de Movimento
- * Bloqueia movimento se a casa for OBSTACLE ou ocupada por outra unidade/núcleo.
- */
 export function getValidMovementTiles(
   unit: BoardUnit,
   grid: GridTile[][],
   allUnits: BoardUnit[],
   cores: BoardCore[]
 ): { x: number; y: number }[] {
-  const movement = unit.card.movementTiles || 0;
+  // Unidades com ROOTED (Enraizadas/Teia) ficam com 0 de movimento naquele turno
+  const isRooted = (unit.statusEffects || []).some(
+    (s) => s.type === "ROOTED" && s.turnsLeft > 0
+  );
+  if (isRooted) return [];
+
+  // Redução de movimento por SLOWED (-1 casa por 2 rodadas)
+  const slowEffect = (unit.statusEffects || []).find(
+    (s) => s.type === "SLOWED" && s.turnsLeft > 0
+  );
+  const slowPenalty = slowEffect ? slowEffect.value : 0;
+  const baseMovement = unit.card.movementTiles || 0;
+  const movement = Math.max(0, baseMovement - slowPenalty);
   if (movement <= 0) return [];
 
-  // Conjunto de posições bloqueadas (obstáculos, outras unidades e núcleos)
-  const blockedTiles = new Set<string>();
+  // Voador: Passa por cima de obstáculos
+  const descLower = (unit.card.description || "").toLowerCase();
+  const nameLower = (unit.card.name || "").toLowerCase();
+  const isFlying =
+    descLower.includes("voador") ||
+    descLower.includes("passa por cima de obstáculos") ||
+    nameLower.includes("vespa caçadora") ||
+    nameLower.includes("vespa cacadora") ||
+    nameLower.includes("mariposa da névoa") ||
+    nameLower.includes("mariposa da nevoa");
+
+  const height = grid.length || BOARD_HEIGHT;
+  const width = grid[0]?.length || BOARD_WIDTH;
+
+  const obstacleTiles = new Set<string>();
+  const occupiedTiles = new Set<string>();
 
   for (const row of grid) {
     for (const tile of row) {
       if (tile.type === "OBSTACLE") {
-        blockedTiles.add(`${tile.x},${tile.y}`);
+        obstacleTiles.add(`${tile.x},${tile.y}`);
       }
     }
   }
 
   for (const u of allUnits) {
     if (u.id !== unit.id) {
-      blockedTiles.add(`${u.x},${u.y}`);
+      occupiedTiles.add(`${u.x},${u.y}`);
     }
   }
 
   for (const c of cores) {
-    blockedTiles.add(`${c.x},${c.y}`);
+    occupiedTiles.add(`${c.x},${c.y}`);
   }
 
   const validTiles: { x: number; y: number }[] = [];
-  const visited = new Map<string, number>(); // "x,y" -> menor custo até ali
+  const visited = new Map<string, number>();
 
-  // Fila para BFS: [x, y, passosRestantes]
   const queue: [number, number, number][] = [[unit.x, unit.y, movement]];
   visited.set(`${unit.x},${unit.y}`, 0);
 
   const directions = [
-    { dx: 0, dy: -1 }, // Cima
-    { dx: 0, dy: 1 },  // Baixo
-    { dx: -1, dy: 0 }, // Esquerda
-    { dx: 1, dy: 0 },  // Direita
+    { dx: 0, dy: -1 },
+    { dx: 0, dy: 1 },
+    { dx: -1, dy: 0 },
+    { dx: 1, dy: 0 },
   ];
 
   while (queue.length > 0) {
@@ -100,16 +123,23 @@ export function getValidMovementTiles(
         const ny = cy + dir.dy;
         const key = `${nx},${ny}`;
 
-        // Checar limites do tabuleiro
-        if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
-          // Checar se não está bloqueado
-          if (!blockedTiles.has(key)) {
+        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+          const isObstacle = obstacleTiles.has(key);
+          const isOccupied = occupiedTiles.has(key);
+
+          // Criaturas voadoras atravessam obstáculos no caminho
+          const canTraverse = isFlying ? !isOccupied : (!isObstacle && !isOccupied);
+          const canLand = !isObstacle && !isOccupied;
+
+          if (canTraverse) {
             const stepsTaken = movement - stepsLeft + 1;
             const previousBest = visited.get(key);
 
             if (previousBest === undefined || stepsTaken < previousBest) {
               visited.set(key, stepsTaken);
-              validTiles.push({ x: nx, y: ny });
+              if (canLand) {
+                validTiles.push({ x: nx, y: ny });
+              }
               queue.push([nx, ny, stepsLeft - 1]);
             }
           }
@@ -121,10 +151,6 @@ export function getValidMovementTiles(
   return validTiles;
 }
 
-/**
- * Algoritmo de traçado de raio (Raycasting / Bresenham) para verificar Linha de Visão
- * Retorna true se houver visão desobstruída entre (x0, y0) e (x1, y1)
- */
 export function hasLineOfSight(
   x0: number,
   y0: number,
@@ -133,7 +159,6 @@ export function hasLineOfSight(
   grid: GridTile[][],
   allUnits: BoardUnit[]
 ): boolean {
-  // Se for a mesma célula
   if (x0 === x1 && y0 === y1) return true;
 
   const dx = Math.abs(x1 - x0);
@@ -146,23 +171,19 @@ export function hasLineOfSight(
   let currY = y0;
 
   while (true) {
-    // Checar se chegamos ao destino
     if (currX === x1 && currY === y1) {
       return true;
     }
 
-    // Se não for a origem, verificar se há obstáculo ou criatura bloqueando a linha de tiro
     if (!(currX === x0 && currY === y0)) {
-      // 1. Checar se o tile é um obstáculo alto
       const tile = grid[currY]?.[currX];
       if (tile && tile.type === "OBSTACLE") {
-        return false; // Bloqueado por obstáculo!
+        return false;
       }
 
-      // 2. Checar se há outra criatura bloqueando a visão no caminho intermediário
       const hasUnit = allUnits.some((u) => u.x === currX && u.y === currY);
       if (hasUnit) {
-        return false; // Bloqueado por outra criatura na linha de fogo!
+        return false;
       }
     }
 
@@ -178,11 +199,6 @@ export function hasLineOfSight(
   }
 }
 
-/**
- * Calcula as casas válidas de Ataque baseando-se em range_tiles e attack_type
- * - ARREMESSO: Ataque balístico que ignora obstáculos e unidades no caminho intermediário.
- * - LINE_OF_SIGHT: Ataque direto bloqueado por obstáculos e criaturas no trajeto.
- */
 export function getValidAttackTiles(
   unit: BoardUnit,
   grid: GridTile[][],
@@ -191,23 +207,22 @@ export function getValidAttackTiles(
   const range = unit.card.rangeTiles || 0;
   if (range <= 0) return [];
 
+  const height = grid.length || BOARD_HEIGHT;
+  const width = grid[0]?.length || BOARD_WIDTH;
+
   const attackType = unit.card.attackType || "LINE_OF_SIGHT";
   const validTiles: { x: number; y: number }[] = [];
 
-  for (let y = 0; y < BOARD_HEIGHT; y++) {
-    for (let x = 0; x < BOARD_WIDTH; x++) {
-      // Não pode atacar o próprio tile onde a criatura está
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
       if (x === unit.x && y === unit.y) continue;
 
-      // Distância de Manhattan (ou Chebyshev para grids ortogonais/diagonais)
       const distance = Math.max(Math.abs(x - unit.x), Math.abs(y - unit.y));
 
       if (distance <= range) {
         if (attackType === "ARREMESSO") {
-          // Arremesso: Trajetória parabólica, não é bloqueada por obstáculos intermediários!
           validTiles.push({ x, y });
         } else {
-          // Line of Sight: Requer visão direta desobstruída
           if (hasLineOfSight(unit.x, unit.y, x, y, grid, allUnits)) {
             validTiles.push({ x, y });
           }
@@ -218,4 +233,3 @@ export function getValidAttackTiles(
 
   return validTiles;
 }
-

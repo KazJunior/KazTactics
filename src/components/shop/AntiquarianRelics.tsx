@@ -84,6 +84,94 @@ export function EldritchUrn() {
   );
 }
 
+// 2.5 Relicário Astral Supremo (Pacote Supremo - Apenas Épicas 90% e Lendárias 10%)
+export function SupremeAstralReliquary() {
+  return (
+    <svg
+      viewBox="0 0 100 85"
+      className="w-24 h-20 md:w-28 md:h-24 overflow-visible filter drop-shadow-[0_0_24px_rgba(250,204,21,0.65)]"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      {/* Sombra e Halo Dourado-Imperial */}
+      <ellipse cx="50" cy="78" rx="40" ry="8" fill="#09080B" />
+      <circle
+        cx="50"
+        cy="42"
+        r="34"
+        fill="#D97724"
+        fillOpacity="0.25"
+        className="animate-pulse"
+      />
+
+      {/* Asas Ornamentais de Ouro nas Laterais */}
+      <path
+        d="M20 46 L6 30 L16 32 L10 20 L24 28 Z"
+        fill="#FACC15"
+        stroke="#09080B"
+        strokeWidth="2"
+      />
+      <path
+        d="M80 46 L94 30 L84 32 L90 20 L76 28 Z"
+        fill="#FACC15"
+        stroke="#09080B"
+        strokeWidth="2"
+      />
+
+      {/* Corpo do Relicário Real em Ouro Velho e Púrpura */}
+      <polygon
+        points="22,30 78,30 72,72 28,72"
+        fill="#2A1238"
+        stroke="#09080B"
+        strokeWidth="2.5"
+      />
+      <polygon
+        points="18,30 82,30 74,18 26,18"
+        fill="#D97724"
+        stroke="#09080B"
+        strokeWidth="2.5"
+      />
+
+      {/* Coroa Suprema no Topo */}
+      <polygon
+        points="32,18 36,6 44,14 50,4 56,14 64,6 68,18"
+        fill="#FEF08A"
+        stroke="#09080B"
+        strokeWidth="2"
+      />
+
+      {/* Bordas e Pilares de Ouro Maciço */}
+      <rect
+        x="26"
+        y="30"
+        width="6"
+        height="42"
+        fill="#F59E0B"
+        stroke="#09080B"
+        strokeWidth="1.8"
+      />
+      <rect
+        x="68"
+        y="30"
+        width="6"
+        height="42"
+        fill="#F59E0B"
+        stroke="#09080B"
+        strokeWidth="1.8"
+      />
+
+      {/* Cristal Lendário Central Pulsante */}
+      <polygon
+        points="50,34 60,48 50,62 40,48"
+        fill="#F43F5E"
+        stroke="#FEF08A"
+        strokeWidth="2"
+        className="animate-pulse"
+      />
+      <polygon points="50,38 56,48 50,58 44,48" fill="#FEF08A" />
+    </svg>
+  );
+}
+
 // 3. Quebra de Correntes de Ferro (Animação de Abertura)
 export function ChainsShatterAnim() {
   return (

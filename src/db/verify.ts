@@ -6,6 +6,10 @@ import { eq, sql } from "drizzle-orm";
 async function verify() {
   console.log("🔍 Verificando integridade das tabelas no NeonDB...");
 
+  await db.execute(
+    sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "avatar_card_name" varchar(120) DEFAULT 'Lobo Cinzento Caçador' NOT NULL`
+  );
+
   const [totalCards] = await db.select({ count: sql<number>`count(*)` }).from(cards);
   const [totalStages] = await db.select({ count: sql<number>`count(*)` }).from(campaignStages);
   const [totalUsers] = await db.select({ count: sql<number>`count(*)` }).from(users);

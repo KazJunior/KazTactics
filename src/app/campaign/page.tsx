@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { campaignStages, users } from "@/db/schema";
 import { Navbar } from "@/components/Navbar";
 import { CampaignMap } from "@/components/campaign/CampaignMap";
+import { getEffectiveUser } from "@/lib/auth";
 import { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -17,13 +18,13 @@ export default async function CampaignPage() {
   let stages: (typeof campaignStages.$inferSelect)[] = [];
 
   try {
-    const [fetchedStages, fetchedUsers] = await Promise.all([
+    const [fetchedStages, currentUser] = await Promise.all([
       db.select().from(campaignStages),
-      db.select().from(users).limit(1),
+      getEffectiveUser(),
     ]);
 
     stages = fetchedStages;
-    user = fetchedUsers[0] || null;
+    user = currentUser;
   } catch (error) {
     console.error("Erro ao carregar estágios da campanha:", error);
   }
